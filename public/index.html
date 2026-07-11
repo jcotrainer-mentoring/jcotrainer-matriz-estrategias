@@ -16,7 +16,7 @@
 
 <header class="topbar">
   <div class="brand">
-    <span class="brand-mark">JCO<span class="brand-mark-accent">TRAINER</span></span>
+    <span class="brand-mark" id="brandMark" style="cursor:default;">JCO<span class="brand-mark-accent">TRAINER</span></span>
     <span class="brand-sub">Matriz de estrategias de captación</span>
   </div>
   <div class="whoami">
@@ -121,6 +121,64 @@
     </div>
   </section>
 
+  <!-- ===================== INFORMES ===================== -->
+  <section class="panel" id="panel-informes">
+    <h1>Informes para el coach senior</h1>
+    <p class="lead">Comparación de resultados, tendencias, proyecciones y feedback por entrenador — calculado desde la API de KPIs del tablero.</p>
+
+    <div id="candadoInformes" class="gate-box">
+      <div class="gate-icon">🔒</div>
+      <h2 style="margin-top:0">Acceso restringido</h2>
+      <p class="lead" style="margin-bottom:16px">Esta sección es solo para el coach senior. Ingresa la clave de acceso para ver los informes.</p>
+      <div class="gate-row">
+        <input type="password" id="claveCoachInput" placeholder="Clave de acceso" />
+        <button class="btn btn-ok" id="btnDesbloquear" type="button">Desbloquear</button>
+      </div>
+      <p id="gateError" class="gate-error" hidden></p>
+    </div>
+
+    <div id="informesDesbloqueado" hidden>
+      <div class="informes-toolbar">
+        <div>
+          <label for="selectorInforme">Ver informe de</label>
+          <select id="selectorInforme">
+            <option value="">Equipo completo</option>
+          </select>
+        </div>
+        <div class="informes-actions">
+          <button class="btn btn-ok" id="btnDescargarPdf" type="button">⬇ Descargar PDF</button>
+          <button class="btn" id="btnEnviarCorreo" type="button">✉ Enviar por correo</button>
+          <button class="btn btn-ghost" id="btnCerrarSesionCoach" type="button">Cerrar sesión</button>
+        </div>
+      </div>
+
+      <div id="reporteContenido">
+        <div class="rings-row" id="informeStats"></div>
+
+        <h2>Ranking del equipo</h2>
+        <div class="table-wrap">
+          <table class="data-table" id="tablaRanking"></table>
+        </div>
+
+        <h2 id="tituloComparacion">Comparación entre entrenadores</h2>
+        <div class="chart-card"><canvas id="chartComparacion" height="120"></canvas></div>
+
+        <h2 id="tituloTendencia">Evolución semanal y proyección</h2>
+        <div class="chart-card"><canvas id="chartTendencia" height="120"></canvas></div>
+
+        <div id="bloqueEstrategiaEnt" hidden>
+          <h2>Cumplimiento por estrategia</h2>
+          <div class="chart-card"><canvas id="chartEstrategiaEnt" height="140"></canvas></div>
+        </div>
+
+        <div id="bloqueFeedback" hidden>
+          <h2>Feedback sugerido para la mentoría</h2>
+          <ul class="feedback-list" id="listaFeedback"></ul>
+        </div>
+      </div>
+    </div>
+  </section>
+
 </main>
 
 <footer class="footer">JCOTRAINER · Tablero compartido del equipo · alojado en Netlify</footer>
@@ -142,6 +200,9 @@
   </div>
 </div>
 
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.4/dist/chart.umd.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/html2canvas@1.4.1/dist/html2canvas.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/jspdf@2.5.1/dist/jspdf.umd.min.js"></script>
 <script src="/app.js"></script>
 </body>
 </html>

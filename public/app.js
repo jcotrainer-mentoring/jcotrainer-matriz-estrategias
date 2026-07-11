@@ -87,6 +87,51 @@ function entrenadorActivo() {
 }
 
 // ---------------------------------------------------------------
+// Pestaña Informes: oculta por defecto, solo visible para el coach
+// ---------------------------------------------------------------
+const FLAG_TAB_VISIBLE = "jco-coach-tab-visible";
+
+function insertarTabInformes() {
+  if (document.querySelector('.tab[data-tab="informes"]')) return; // ya insertada
+  const tabs = document.getElementById("tabs");
+  const btn = document.createElement("button");
+  btn.className = "tab";
+  btn.dataset.tab = "informes";
+  btn.textContent = "Informes";
+  tabs.appendChild(btn);
+}
+
+function revelarPestanaCoach() {
+  localStorage.setItem(FLAG_TAB_VISIBLE, "1");
+  insertarTabInformes();
+  toast("Pestaña de Informes activada en este dispositivo");
+}
+
+// Gatillo 1: ya se activó antes en este dispositivo
+if (localStorage.getItem(FLAG_TAB_VISIBLE) === "1") {
+  insertarTabInformes();
+}
+
+// Gatillo 2: entrar con ?coach=1 en la URL (por ejemplo, desde un link guardado)
+if (new URLSearchParams(window.location.search).get("coach") === "1") {
+  revelarPestanaCoach();
+  history.replaceState(null, "", window.location.pathname);
+}
+
+// Gatillo 3: 5 clics seguidos sobre el logo "JCOTRAINER" (para activarla sin URL especial)
+let clicsLogo = 0;
+let clicsLogoTimer = null;
+document.getElementById("brandMark").addEventListener("click", () => {
+  clicsLogo += 1;
+  clearTimeout(clicsLogoTimer);
+  clicsLogoTimer = setTimeout(() => { clicsLogo = 0; }, 1500);
+  if (clicsLogo >= 5) {
+    clicsLogo = 0;
+    revelarPestanaCoach();
+  }
+});
+
+// ---------------------------------------------------------------
 // Tabs
 // ---------------------------------------------------------------
 document.getElementById("tabs").addEventListener("click", (e) => {
@@ -96,6 +141,7 @@ document.getElementById("tabs").addEventListener("click", (e) => {
   document.querySelectorAll(".panel").forEach((p) => p.classList.remove("active"));
   btn.classList.add("active");
   document.getElementById("panel-" + btn.dataset.tab).classList.add("active");
+  if (btn.dataset.tab === "informes") mostrarEstadoInformes();
 });
 
 // ---------------------------------------------------------------
@@ -398,3 +444,304 @@ function renderAll() {
 }
 
 cargarEstado();
+
+// =================================================================
+// INFORMES — API de KPIs, comparación, proyección, PDF y email
+// =================================================================
+let KPIS = null;
+let chartComparacion, chartTendencia, chartEstrategiaEnt;
+
+function claveCoachGuardada() {
+  return localStorage.getItem("jco-coach-key") || "";
+}
+
+function mostrarEstadoInformes() {
+  const clave = claveCoachGuardada();
+  if (clave) {
+    intentarCargarKpis(clave, { silencioso: true });
+  } else {
+    mostrarCandado();
+  }
+}
+
+function mostrarCandado(mensajeError) {
+  document.getElementById("candadoInformes").hidden = false;
+  document.getElementById("informesDesbloqueado").hidden = true;
+  const err = document.getElementById("gateError");
+  if (mensajeError) {
+    err.textContent = mensajeError;
+    err.hidden = false;
+  } else {
+    err.hidden = true;
+  }
+}
+
+async function intentarCargarKpis(clave, { silencioso = false } = {}) {
+  const btn = document.getElementById("btnDesbloquear");
+  if (!silencioso) { btn.textContent = "Verificando..."; btn.disabled = true; }
+  try {
+    const res = await fetch("/api/kpis", { headers: { "x-coach-key": clave } });
+    const data = await res.json();
+    if (res.ok) {
+      localStorage.setItem("jco-coach-key", clave);
+      KPIS = data;
+      document.getElementById("candadoInformes").hidden = true;
+      document.getElementById("informesDesbloqueado").hidden = false;
+      poblarSelectorInforme();
+      renderInforme(document.getElementById("selectorInforme").value);
+    } else if (data.error === "config-faltante") {
+      localStorage.removeItem("jco-coach-key");
+      mostrarCandado("Esta sección aún no está configurada por el administrador del tablero (falta definir COACH_ACCESS_KEY en Netlify).");
+    } else {
+      localStorage.removeItem("jco-coach-key");
+      mostrarCandado("Clave incorrecta. Inténtalo de nuevo.");
+    }
+  } catch (err) {
+    mostrarCandado("No se pudo verificar el acceso. Revisa tu conexión e inténtalo de nuevo.");
+  } finally {
+    if (!silencioso) { btn.textContent = "Desbloquear"; btn.disabled = false; }
+  }
+}
+
+document.getElementById("btnDesbloquear").addEventListener("click", () => {
+  const clave = document.getElementById("claveCoachInput").value.trim();
+  if (!clave) return;
+  intentarCargarKpis(clave);
+});
+document.getElementById("claveCoachInput").addEventListener("keydown", (e) => {
+  if (e.key === "Enter") document.getElementById("btnDesbloquear").click();
+});
+document.getElementById("btnCerrarSesionCoach").addEventListener("click", () => {
+  localStorage.removeItem("jco-coach-key");
+  localStorage.removeItem(FLAG_TAB_VISIBLE);
+  document.getElementById("claveCoachInput").value = "";
+  mostrarCandado();
+  const tabInformes = document.querySelector('.tab[data-tab="informes"]');
+  if (tabInformes) tabInformes.remove();
+  document.querySelectorAll(".tab").forEach((t) => t.classList.remove("active"));
+  document.querySelectorAll(".panel").forEach((p) => p.classList.remove("active"));
+  document.querySelector('.tab[data-tab="instrucciones"]').classList.add("active");
+  document.getElementById("panel-instrucciones").classList.add("active");
+  toast("Sesión de coach cerrada y pestaña ocultada en este dispositivo");
+});
+
+function poblarSelectorInforme() {
+  const sel = document.getElementById("selectorInforme");
+  const actual = sel.value;
+  sel.innerHTML = `<option value="">Equipo completo</option>` +
+    KPIS.porEntrenador.map((e) => `<option value="${e.nombre}" ${e.nombre === actual ? "selected" : ""}>${e.nombre}</option>`).join("");
+}
+
+document.getElementById("selectorInforme").addEventListener("change", (e) => renderInforme(e.target.value));
+
+function colorPct(p) {
+  if (p >= 80) return "#8BC53F";
+  if (p >= 50) return "#F2A93B";
+  return "#E8564B";
+}
+
+function renderInforme(entrenadorSeleccionado) {
+  if (!KPIS) return;
+  const esEquipo = !entrenadorSeleccionado;
+  const ent = esEquipo ? null : KPIS.porEntrenador.find((e) => e.nombre === entrenadorSeleccionado);
+  const datosScope = esEquipo ? KPIS.equipo : ent;
+
+  // --- Stats (rings) ---
+  document.getElementById("informeStats").innerHTML =
+    renderRing(esEquipo ? "Cumplimiento del equipo" : `Cumplimiento de ${ent.nombre}`, datosScope.pct) +
+    renderStatCard("Registros totales", datosScope.total) +
+    renderStatCard("Proyección próx. semana", datosScope.proyeccion.proyeccionPct + "%") +
+    renderStatCard("Tendencia", { alza: "↑ Al alza", baja: "↓ A la baja", estable: "→ Estable", "sin datos": "Sin datos" }[datosScope.proyeccion.tendencia] || "—");
+
+  // --- Ranking (siempre equipo completo) ---
+  document.getElementById("tablaRanking").innerHTML = `
+    <tr><th>#</th><th>Entrenador</th><th>Registros</th><th>% Cumplimiento</th></tr>
+    ${KPIS.ranking.map((r) => `<tr ${r.nombre === entrenadorSeleccionado ? 'style="outline:2px solid #8BC53F;"' : ""}>
+      <td>${r.posicion}</td>
+      <td>${r.nombre}</td>
+      <td>${r.total}</td>
+      <td><div class="bar-cell"><div class="bar-track"><div class="bar-fill" style="width:${r.pct}%;background:${colorPct(r.pct)}"></div></div><span>${r.pct}%</span></div></td>
+    </tr>`).join("")}`;
+
+  // --- Gráfico comparación entre entrenadores ---
+  document.getElementById("tituloComparacion").textContent = "Comparación entre entrenadores";
+  const ctxComp = document.getElementById("chartComparacion");
+  if (chartComparacion) chartComparacion.destroy();
+  chartComparacion = new Chart(ctxComp, {
+    type: "bar",
+    data: {
+      labels: KPIS.porEntrenador.map((e) => e.nombre),
+      datasets: [{
+        label: "% Cumplimiento",
+        data: KPIS.porEntrenador.map((e) => e.pct),
+        backgroundColor: KPIS.porEntrenador.map((e) => e.nombre === entrenadorSeleccionado ? "#8BC53F" : "#4A5560"),
+        borderRadius: 6,
+      }],
+    },
+    options: chartOptionsBase({ max: 100, suffix: "%" }),
+  });
+
+  // --- Gráfico tendencia semanal + proyección ---
+  document.getElementById("tituloTendencia").textContent = esEquipo
+    ? "Evolución semanal del equipo y proyección"
+    : `Evolución semanal de ${ent.nombre} y proyección`;
+  const serie = datosScope.serieSemanal;
+  const labels = serie.map((s) => s.semana.slice(5));
+  const valores = serie.map((s) => s.pct);
+  const labelsConProyeccion = [...labels, "Próx. semana"];
+  const valoresConProyeccion = [...valores, datosScope.proyeccion.proyeccionPct];
+  const ctxTend = document.getElementById("chartTendencia");
+  if (chartTendencia) chartTendencia.destroy();
+  chartTendencia = new Chart(ctxTend, {
+    type: "line",
+    data: {
+      labels: labelsConProyeccion,
+      datasets: [{
+        label: "% Cumplimiento",
+        data: valoresConProyeccion,
+        segment: {
+          borderDash: (c) => (c.p1DataIndex === valoresConProyeccion.length - 1 ? [6, 4] : undefined),
+        },
+        borderColor: "#8BC53F",
+        backgroundColor: "rgba(139,197,63,0.15)",
+        pointBackgroundColor: (c) => (c.dataIndex === valoresConProyeccion.length - 1 ? "#F2A93B" : "#8BC53F"),
+        tension: 0.3,
+        fill: true,
+      }],
+    },
+    options: chartOptionsBase({ max: 100, suffix: "%" }),
+  });
+
+  // --- Comparación por estrategia (solo si hay entrenador seleccionado) ---
+  const bloqueEstrategia = document.getElementById("bloqueEstrategiaEnt");
+  const bloqueFeedback = document.getElementById("bloqueFeedback");
+  if (esEquipo) {
+    bloqueEstrategia.hidden = true;
+    bloqueFeedback.hidden = true;
+  } else {
+    bloqueEstrategia.hidden = false;
+    bloqueFeedback.hidden = false;
+    const ctxEst = document.getElementById("chartEstrategiaEnt");
+    if (chartEstrategiaEnt) chartEstrategiaEnt.destroy();
+    chartEstrategiaEnt = new Chart(ctxEst, {
+      type: "bar",
+      data: {
+        labels: ent.porEstrategia.map((e) => String(e.n).padStart(2, "0")),
+        datasets: [
+          { label: ent.nombre, data: ent.porEstrategia.map((e) => e.pct), backgroundColor: "#8BC53F", borderRadius: 6 },
+          { label: "Promedio equipo", data: KPIS.equipo.porEstrategia.map((e) => e.pct), backgroundColor: "#4A5560", borderRadius: 6 },
+        ],
+      },
+      options: chartOptionsBase({ max: 100, suffix: "%", legend: true }),
+    });
+
+    document.getElementById("listaFeedback").innerHTML = ent.feedback.map((f) => `<li>${f}</li>`).join("");
+  }
+}
+
+function chartOptionsBase({ max, suffix, legend = false }) {
+  return {
+    responsive: true,
+    plugins: {
+      legend: { display: legend, labels: { color: "#EDEFF2", font: { family: "Inter" } } },
+      tooltip: { callbacks: { label: (c) => `${c.dataset.label}: ${c.formattedValue}${suffix || ""}` } },
+    },
+    scales: {
+      x: { ticks: { color: "#93A1AC", font: { family: "Inter", size: 11 } }, grid: { color: "#3A424B" } },
+      y: { beginAtZero: true, max, ticks: { color: "#93A1AC", font: { family: "Inter", size: 11 } }, grid: { color: "#3A424B" } },
+    },
+  };
+}
+
+// --- Descargar informe en PDF (captura el bloque de reporte) ---
+document.getElementById("btnDescargarPdf").addEventListener("click", async () => {
+  const btn = document.getElementById("btnDescargarPdf");
+  const original = btn.textContent;
+  btn.textContent = "Generando...";
+  btn.disabled = true;
+  try {
+    const nodo = document.getElementById("reporteContenido");
+    const canvas = await html2canvas(nodo, { backgroundColor: "#1B1F23", scale: 2 });
+    const { jsPDF } = window.jspdf;
+    const pdf = new jsPDF({ orientation: "portrait", unit: "pt", format: "a4" });
+    const pageW = pdf.internal.pageSize.getWidth();
+    const pageH = pdf.internal.pageSize.getHeight();
+    const imgW = pageW - 40;
+    const imgH = (canvas.height * imgW) / canvas.width;
+    let restante = imgH;
+    let posY = 20;
+    let pagina = 0;
+    const imgData = canvas.toDataURL("image/png");
+    while (restante > 0) {
+      if (pagina > 0) pdf.addPage();
+      pdf.addImage(imgData, "PNG", 20, posY - pagina * (pageH - 40), imgW, imgH);
+      restante -= (pageH - 40);
+      pagina += 1;
+    }
+    const sel = document.getElementById("selectorInforme").value;
+    const nombreArchivo = sel ? `Informe_${sel.replace(/\s+/g, "_")}.pdf` : "Informe_Equipo_JCOTRAINER.pdf";
+    pdf.save(nombreArchivo);
+    toast("PDF descargado");
+  } catch (err) {
+    toast("No se pudo generar el PDF");
+    console.error(err);
+  } finally {
+    btn.textContent = original;
+    btn.disabled = false;
+  }
+});
+
+// --- Enviar informe por correo ---
+document.getElementById("btnEnviarCorreo").addEventListener("click", async () => {
+  const sel = document.getElementById("selectorInforme").value;
+  const destinatario = prompt("¿A qué correo quieres enviar este informe?");
+  if (!destinatario) return;
+  const btn = document.getElementById("btnEnviarCorreo");
+  const original = btn.textContent;
+  btn.textContent = "Enviando...";
+  btn.disabled = true;
+  try {
+    const res = await fetch("/api/enviar-informe", {
+      method: "POST",
+      headers: { "Content-Type": "application/json", "x-coach-key": claveCoachGuardada() },
+      body: JSON.stringify({ destinatario, entrenador: sel || null }),
+    });
+    const data = await res.json();
+    if (res.ok) {
+      toast("Informe enviado a " + destinatario);
+    } else if (data.error === "no-autorizado") {
+      localStorage.removeItem("jco-coach-key");
+      toast("Tu sesión de coach expiró, vuelve a desbloquear la sección");
+      mostrarCandado("Vuelve a ingresar la clave de acceso.");
+    } else if (data.error === "config-faltante") {
+      if (confirm((data.message || "El envío automático no está disponible todavía.") + "\n\n¿Quieres abrir tu app de correo con un borrador del informe en su lugar?")) {
+        abrirBorradorCorreo(destinatario, sel);
+      }
+    } else {
+      toast("No se pudo enviar el correo");
+      console.error(data);
+    }
+  } catch (err) {
+    toast("No se pudo enviar el correo");
+    console.error(err);
+  } finally {
+    btn.textContent = original;
+    btn.disabled = false;
+  }
+});
+
+function abrirBorradorCorreo(destinatario, entrenadorSeleccionado) {
+  const esEquipo = !entrenadorSeleccionado;
+  const datos = esEquipo ? KPIS.equipo : KPIS.porEntrenador.find((e) => e.nombre === entrenadorSeleccionado);
+  const asunto = esEquipo ? "JCOTRAINER · Informe de equipo" : `JCOTRAINER · Informe de ${entrenadorSeleccionado}`;
+  let cuerpo = `Informe generado desde el tablero JCOTRAINER\n\n`;
+  cuerpo += `Cumplimiento: ${datos.pct}%\nRegistros totales: ${datos.total}\nProyección próxima semana: ${datos.proyeccion.proyeccionPct}%\n\n`;
+  if (!esEquipo) {
+    cuerpo += "Feedback:\n" + datos.feedback.map((f) => "- " + f).join("\n") + "\n\n";
+  } else {
+    cuerpo += "Ranking:\n" + KPIS.ranking.map((r) => `${r.posicion}. ${r.nombre} — ${r.pct}% (${r.total} registros)`).join("\n") + "\n\n";
+  }
+  cuerpo += "(Adjunta el PDF descargado desde el botón \"Descargar PDF\" si quieres incluir los gráficos.)";
+  const link = `mailto:${encodeURIComponent(destinatario)}?subject=${encodeURIComponent(asunto)}&body=${encodeURIComponent(cuerpo)}`;
+  window.location.href = link;
+}
