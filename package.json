@@ -1,0 +1,10 @@
+{
+  "name": "jcotrainer-matriz-estrategias",
+  "version": "1.0.0",
+  "description": "Matriz estrategica de captacion de clientes JCOTRAINER - app compartida para entrenadores, pensada para Netlify.",
+  "private": true,
+  "type": "module",
+  "dependencies": {
+    "@netlify/blobs": "^8.1.0"
+  }
+}
