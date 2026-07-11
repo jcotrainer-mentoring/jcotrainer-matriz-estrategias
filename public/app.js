@@ -327,6 +327,65 @@ function toast(msg) {
 }
 
 // ---------------------------------------------------------------
+// Gestionar entrenadores
+// ---------------------------------------------------------------
+const modal = document.getElementById("modalEntrenadores");
+
+function abrirModalEntrenadores() {
+  renderListaEntrenadoresModal();
+  modal.hidden = false;
+}
+function cerrarModalEntrenadores() {
+  modal.hidden = true;
+}
+
+function renderListaEntrenadoresModal() {
+  const cont = document.getElementById("listaEntrenadoresModal");
+  cont.innerHTML = STATE.entrenadores.map((e) => `
+    <span class="entrenador-chip">${e}
+      <button data-nombre="${e}" title="Quitar" type="button">✕</button>
+    </span>`).join("") || `<span style="color:var(--steel);font-size:13px">Aún no hay entrenadores.</span>`;
+
+  cont.querySelectorAll("button[data-nombre]").forEach((btn) => {
+    btn.addEventListener("click", async () => {
+      if (STATE.entrenadores.length <= 1) {
+        toast("Debe quedar al menos un entrenador");
+        return;
+      }
+      if (!confirm(`¿Quitar a "${btn.dataset.nombre}" del equipo? (su historial de registros no se borra)`)) return;
+      const nuevaLista = STATE.entrenadores.filter((e) => e !== btn.dataset.nombre);
+      await enviar({ type: "reemplazar", data: { entrenadores: nuevaLista } });
+      renderListaEntrenadoresModal();
+      toast("Entrenador eliminado del equipo");
+    });
+  });
+}
+
+document.getElementById("btnGestionarEntrenadores").addEventListener("click", abrirModalEntrenadores);
+document.getElementById("btnCerrarModal").addEventListener("click", cerrarModalEntrenadores);
+modal.addEventListener("click", (e) => { if (e.target === modal) cerrarModalEntrenadores(); });
+
+document.getElementById("btnAgregarEntrenador").addEventListener("click", agregarEntrenador);
+document.getElementById("nuevoEntrenadorInput").addEventListener("keydown", (e) => {
+  if (e.key === "Enter") agregarEntrenador();
+});
+
+async function agregarEntrenador() {
+  const input = document.getElementById("nuevoEntrenadorInput");
+  const nombre = input.value.trim();
+  if (!nombre) return;
+  if (STATE.entrenadores.includes(nombre)) {
+    toast("Ese entrenador ya existe");
+    return;
+  }
+  const nuevaLista = [...STATE.entrenadores, nombre];
+  await enviar({ type: "reemplazar", data: { entrenadores: nuevaLista } });
+  input.value = "";
+  renderListaEntrenadoresModal();
+  toast("Entrenador agregado");
+}
+
+// ---------------------------------------------------------------
 // Render all
 // ---------------------------------------------------------------
 function renderAll() {

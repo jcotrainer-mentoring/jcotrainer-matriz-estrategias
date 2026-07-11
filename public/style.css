@@ -303,6 +303,31 @@ h2 {
 }
 .toast.show { opacity: 1; transform: translateX(-50%) translateY(0); }
 
+.modal-overlay {
+  position: fixed; inset: 0; background: rgba(10,12,14,.7);
+  display: flex; align-items: center; justify-content: center;
+  padding: 20px; z-index: 100;
+}
+.modal-overlay[hidden] { display: none; }
+.modal-box {
+  background: var(--panel); border: 1px solid var(--line); border-radius: 16px;
+  padding: 26px; max-width: 440px; width: 100%;
+}
+.entrenador-chip-list { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 18px; }
+.entrenador-chip {
+  display: inline-flex; align-items: center; gap: 8px;
+  background: var(--panel-2); border: 1px solid var(--line); border-radius: 999px;
+  padding: 6px 8px 6px 14px; font-size: 13px;
+}
+.entrenador-chip button {
+  background: none; border: none; color: var(--coral); cursor: pointer; font-size: 14px;
+  width: 20px; height: 20px; border-radius: 50%; display:flex; align-items:center; justify-content:center;
+}
+.entrenador-chip button:hover { background: var(--coral-dim); }
+.modal-add-row { display: flex; gap: 8px; }
+.modal-add-row input { flex: 1; }
+.modal-actions { margin-top: 20px; text-align: right; }
+
 @media (max-width: 600px) {
   .matriz-grid .matriz-card { grid-template-columns: 1fr; }
   .matriz-num { display: none; }
