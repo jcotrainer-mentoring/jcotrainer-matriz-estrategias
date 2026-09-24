@@ -62,6 +62,15 @@ const TAREAS = {
 const FREQ_LABEL = { diario: "Diaria", semanal: "Semanal", mensual: "Mensual" };
 
 // ---------------------------------------------------------------
+// Resultados de negocio: qué generó cada interacción cumplida.
+// ---------------------------------------------------------------
+const RESULTADO_OPTS = ["Sin resultado", "Interés generado", "Cliente convertido"];
+
+function formatCLP(valor) {
+  return "$" + Math.round(valor || 0).toLocaleString("es-CL");
+}
+
+// ---------------------------------------------------------------
 // Multi-cliente (multi-tenant): identificador de grupo via ?g= en la URL.
 // Sin el parámetro, todo funciona igual que antes (grupo por defecto).
 // ---------------------------------------------------------------
@@ -278,6 +287,7 @@ function renderChecklist(frecuenciaKey, contenedorId) {
         tarea: t.nombre,
         entrenador: entrenadorActivo(),
         estado: btn.dataset.estado,
+        resultado: "Sin resultado",
         comentario: "",
       };
       enviar({ type: "agregar-registro", registro });
@@ -319,10 +329,14 @@ function renderSeguimiento() {
   const log = STATE.log;
   const totalCumplidas = log.filter((r) => r.estado === "Cumplida").length;
   const total = log.length;
+  const totalInteres = log.filter((r) => r.estado === "Cumplida" && r.resultado === "Interés generado").length;
+  const totalConversion = log.filter((r) => r.estado === "Cumplida" && r.resultado === "Cliente convertido").length;
 
   document.getElementById("ringsRow").innerHTML =
     renderRing("Cumplimiento general", pct(totalCumplidas, total)) +
     renderStatCard("Total registros", total) +
+    renderStatCard("Interés generado", totalInteres) +
+    renderStatCard("Clientes convertidos", totalConversion) +
     STATE.entrenadores.map((ent) => {
       const c = log.filter((r) => r.entrenador === ent && r.estado === "Cumplida").length;
       const t = log.filter((r) => r.entrenador === ent).length;
@@ -356,22 +370,26 @@ function renderSeguimiento() {
     const nc = rows.filter((r) => r.estado === "No cumplida").length;
     const t = rows.length;
     const p = pct(c, t);
+    const interes = rows.filter((r) => r.estado === "Cumplida" && r.resultado === "Interés generado").length;
+    const conversion = rows.filter((r) => r.estado === "Cumplida" && r.resultado === "Cliente convertido").length;
     return `<tr>
       <td>${ent}</td>
       <td>${c}</td>
       <td>${nc}</td>
       <td>${t}</td>
       <td><div class="bar-cell"><div class="bar-track"><div class="bar-fill" style="width:${p}%"></div></div><span>${p}%</span></div></td>
+      <td>${interes}</td>
+      <td>${conversion}</td>
     </tr>`;
   }).join("");
   document.getElementById("tablaEntrenadores").innerHTML = `
-    <tr><th>Entrenador</th><th>Cumplidas</th><th>No cumplidas</th><th>Total</th><th>% Cumplimiento</th></tr>
+    <tr><th>Entrenador</th><th>Cumplidas</th><th>No cumplidas</th><th>Total</th><th>% Cumplimiento</th><th>Interés</th><th>Conversión</th></tr>
     ${filasEnt}`;
 
   // Log reciente
   const recientes = log.slice(0, 25);
   document.getElementById("tablaLog").innerHTML = `
-    <tr><th>Fecha</th><th>Frecuencia</th><th>Estrategia</th><th>Tarea</th><th>Entrenador</th><th>Estado</th><th></th></tr>
+    <tr><th>Fecha</th><th>Frecuencia</th><th>Estrategia</th><th>Tarea</th><th>Entrenador</th><th>Estado</th><th>Resultado</th><th></th></tr>
     ${recientes.map((r) => `<tr>
       <td>${r.fecha}</td>
       <td>${r.frecuencia}</td>
@@ -379,8 +397,18 @@ function renderSeguimiento() {
       <td>${r.tarea || ""}</td>
       <td>${r.entrenador}</td>
       <td><span class="badge badge-${r.estado.replace(" ", "-")}">${r.estado}</span></td>
+      <td>${r.estado === "Cumplida"
+        ? `<select data-id="${r.id}" class="sel-resultado">${RESULTADO_OPTS.map((o) => `<option ${o === (r.resultado || "Sin resultado") ? "selected" : ""}>${o}</option>`).join("")}</select>`
+        : `<span style="color:var(--steel)">—</span>`}</td>
       <td><button class="btn btn-ghost" data-id="${r.id}">Eliminar</button></td>
     </tr>`).join("")}`;
+
+  document.getElementById("tablaLog").querySelectorAll("select.sel-resultado").forEach((sel) => {
+    sel.addEventListener("change", () => {
+      enviar({ type: "actualizar-registro", id: sel.dataset.id, campo: "resultado", valor: sel.value });
+      toast("Resultado actualizado");
+    });
+  });
 
   document.getElementById("tablaLog").querySelectorAll("button[data-id]").forEach((btn) => {
     btn.addEventListener("click", () => {
@@ -519,6 +547,7 @@ async function intentarCargarKpis(clave, { silencioso = false } = {}) {
       KPIS = data;
       document.getElementById("candadoInformes").hidden = true;
       document.getElementById("informesDesbloqueado").hidden = false;
+      document.getElementById("valorPorClienteInput").value = KPIS.valorPorCliente || "";
       poblarSelectorInforme();
       renderInforme(document.getElementById("selectorInforme").value);
     } else if (data.error === "config-faltante") {
@@ -557,6 +586,23 @@ document.getElementById("btnCerrarSesionCoach").addEventListener("click", () => 
   toast("Sesión de coach cerrada y pestaña ocultada en este dispositivo");
 });
 
+document.getElementById("btnGuardarValorCliente").addEventListener("click", async () => {
+  const input = document.getElementById("valorPorClienteInput");
+  const valor = Math.max(0, Number(input.value) || 0);
+  const btn = document.getElementById("btnGuardarValorCliente");
+  const original = btn.textContent;
+  btn.textContent = "Guardando...";
+  btn.disabled = true;
+  try {
+    await enviar({ type: "reemplazar", data: { config: { valorPorCliente: valor } } });
+    await intentarCargarKpis(claveCoachGuardada(), { silencioso: true });
+    toast("Valor por cliente actualizado");
+  } finally {
+    btn.textContent = original;
+    btn.disabled = false;
+  }
+});
+
 function poblarSelectorInforme() {
   const sel = document.getElementById("selectorInforme");
   const actual = sel.value;
@@ -583,16 +629,20 @@ function renderInforme(entrenadorSeleccionado) {
     renderRing(esEquipo ? "Cumplimiento del equipo" : `Cumplimiento de ${ent.nombre}`, datosScope.pct) +
     renderStatCard("Registros totales", datosScope.total) +
     renderStatCard("Proyección próx. semana", datosScope.proyeccion.proyeccionPct + "%") +
-    renderStatCard("Tendencia", { alza: "↑ Al alza", baja: "↓ A la baja", estable: "→ Estable", "sin datos": "Sin datos" }[datosScope.proyeccion.tendencia] || "—");
+    renderStatCard("Tendencia", { alza: "↑ Al alza", baja: "↓ A la baja", estable: "→ Estable", "sin datos": "Sin datos" }[datosScope.proyeccion.tendencia] || "—") +
+    renderStatCard("Interés generado", datosScope.resultados.interes) +
+    renderStatCard("Clientes convertidos", datosScope.resultados.conversion) +
+    renderStatCard("Valor estimado generado", formatCLP(datosScope.valorEstimado));
 
   // --- Ranking (siempre equipo completo) ---
   document.getElementById("tablaRanking").innerHTML = `
-    <tr><th>#</th><th>Entrenador</th><th>Registros</th><th>% Cumplimiento</th></tr>
+    <tr><th>#</th><th>Entrenador</th><th>Registros</th><th>% Cumplimiento</th><th>Conversiones</th></tr>
     ${KPIS.ranking.map((r) => `<tr ${r.nombre === entrenadorSeleccionado ? 'style="outline:2px solid #8BC53F;"' : ""}>
       <td>${r.posicion}</td>
       <td>${r.nombre}</td>
       <td>${r.total}</td>
       <td><div class="bar-cell"><div class="bar-track"><div class="bar-fill" style="width:${r.pct}%;background:${colorPct(r.pct)}"></div></div><span>${r.pct}%</span></div></td>
+      <td>${r.conversion}</td>
     </tr>`).join("")}`;
 
   // --- Gráfico comparación entre entrenadores ---
@@ -767,7 +817,8 @@ function abrirBorradorCorreo(destinatario, entrenadorSeleccionado) {
   const datos = esEquipo ? KPIS.equipo : KPIS.porEntrenador.find((e) => e.nombre === entrenadorSeleccionado);
   const asunto = esEquipo ? "JCOTRAINER · Informe de equipo" : `JCOTRAINER · Informe de ${entrenadorSeleccionado}`;
   let cuerpo = `Informe generado desde el tablero JCOTRAINER\n\n`;
-  cuerpo += `Cumplimiento: ${datos.pct}%\nRegistros totales: ${datos.total}\nProyección próxima semana: ${datos.proyeccion.proyeccionPct}%\n\n`;
+  cuerpo += `Cumplimiento: ${datos.pct}%\nRegistros totales: ${datos.total}\nProyección próxima semana: ${datos.proyeccion.proyeccionPct}%\n`;
+  cuerpo += `Interés generado: ${datos.resultados.interes}\nClientes convertidos: ${datos.resultados.conversion}\nValor estimado generado: ${formatCLP(datos.valorEstimado)}\n\n`;
   if (!esEquipo) {
     cuerpo += "Feedback:\n" + datos.feedback.map((f) => "- " + f).join("\n") + "\n\n";
   } else {
