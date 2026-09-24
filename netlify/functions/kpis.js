@@ -1,8 +1,7 @@
 import { getStore } from "@netlify/blobs";
 import { computeKpis } from "./lib/kpis.js";
 import { checkCoachAuth } from "./lib/auth.js";
-
-const KEY = "estado-jcotrainer";
+import { grupoFromRequest, cargarEstadoTenant } from "./lib/tenant.js";
 
 const HEADERS = {
   "Content-Type": "application/json; charset=utf-8",
@@ -10,6 +9,10 @@ const HEADERS = {
   "Access-Control-Allow-Methods": "GET, OPTIONS",
   "Access-Control-Allow-Headers": "Content-Type, x-coach-key",
 };
+
+function estadoInicial() {
+  return { matriz: [], log: [], entrenadores: [], updatedAt: null };
+}
 
 export default async (req) => {
   if (req.method === "OPTIONS") {
@@ -25,8 +28,9 @@ export default async (req) => {
   }
 
   const store = getStore("jcotrainer");
-  const state = (await store.get(KEY, { type: "json" })) || { matriz: [], log: [], entrenadores: [] };
+  const grupo = grupoFromRequest(req);
+  const { data: state } = await cargarEstadoTenant(store, grupo, estadoInicial);
   const kpis = computeKpis(state);
 
-  return new Response(JSON.stringify(kpis), { status: 200, headers: HEADERS });
+  return new Response(JSON.stringify({ ...kpis, grupo }), { status: 200, headers: HEADERS });
 };
