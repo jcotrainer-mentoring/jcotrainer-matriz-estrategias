@@ -1,7 +1,16 @@
+import { formatCLP } from "./kpis.js";
+
 function badgeColor(p) {
   if (p >= 80) return "#3E7D1F";
   if (p >= 50) return "#B36B00";
   return "#B03A2E";
+}
+
+function statCard(valor, label) {
+  return `<div style="flex:1;background:#F4F6F8;border-radius:8px;padding:14px;text-align:center;">
+    <div style="font-size:22px;font-weight:bold;">${valor}</div>
+    <div style="font-size:12px;color:#5B6770;">${label}</div>
+  </div>`;
 }
 
 function filaEstrategia(e) {
@@ -34,6 +43,11 @@ export function reportHtmlEntrenador(ent, teamPct, generadoEn) {
           <div style="font-size:28px;font-weight:bold;">${ent.proyeccion.proyeccionPct}%</div>
           <div style="font-size:12px;color:#5B6770;">Proyección próx. semana</div>
         </div>
+      </div>
+      <div style="display:flex;gap:16px;margin:0 0 16px;">
+        ${statCard(ent.resultados.interes, "Interés generado")}
+        ${statCard(ent.resultados.conversion, "Clientes convertidos")}
+        ${statCard(formatCLP(ent.valorEstimado), "Valor estimado generado")}
       </div>
 
       <h3 style="color:#1F3864;font-size:16px;margin:18px 0 8px;">Feedback del mentor (generado a partir de los datos)</h3>
@@ -86,6 +100,11 @@ export function reportHtmlEquipo(kpis) {
           <div style="font-size:28px;font-weight:bold;">${kpis.equipo.proyeccion.proyeccionPct}%</div>
           <div style="font-size:12px;color:#5B6770;">Proyección próx. semana</div>
         </div>
+      </div>
+      <div style="display:flex;gap:16px;margin:0 0 16px;">
+        ${statCard(kpis.equipo.resultados.interes, "Interés generado")}
+        ${statCard(kpis.equipo.resultados.conversion, "Clientes convertidos")}
+        ${statCard(formatCLP(kpis.equipo.valorEstimado), "Valor estimado generado")}
       </div>
 
       <h3 style="color:#1F3864;font-size:16px;margin:18px 0 8px;">Ranking de entrenadores</h3>
