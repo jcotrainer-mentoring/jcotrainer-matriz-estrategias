@@ -13,6 +13,7 @@ function estadoInicial() {
     })),
     log: [],
     entrenadores: ["Entrenador 1", "Entrenador 2", "Entrenador 3", "Entrenador 4"],
+    config: { valorPorCliente: 0 },
     updatedAt: null,
   };
 }
@@ -53,6 +54,16 @@ export default async (req, context) => {
         const { n, campo, valor } = body;
         actual.matriz = actual.matriz.map((row) =>
           row.n === n ? { ...row, [campo]: valor } : row
+        );
+        actual.updatedAt = new Date().toISOString();
+        await store.setJSON(KEY, actual);
+        return new Response(JSON.stringify({ ...actual, grupo }), { status: 200, headers: HEADERS });
+      }
+
+      if (body.type === "actualizar-registro") {
+        const { id, campo, valor } = body;
+        actual.log = actual.log.map((r) =>
+          r.id === id ? { ...r, [campo]: valor } : r
         );
         actual.updatedAt = new Date().toISOString();
         await store.setJSON(KEY, actual);
