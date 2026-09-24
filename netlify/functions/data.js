@@ -1,6 +1,5 @@
 import { getStore } from "@netlify/blobs";
-
-const KEY = "estado-jcotrainer";
+import { grupoFromRequest, keyForGrupo, cargarEstadoTenant } from "./lib/tenant.js";
 
 const ESTRATEGIAS = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10];
 
@@ -31,25 +30,23 @@ export default async (req, context) => {
   }
 
   const store = getStore("jcotrainer");
+  const grupo = grupoFromRequest(req);
+  const KEY = keyForGrupo(grupo);
 
   if (req.method === "GET") {
-    let data = await store.get(KEY, { type: "json" });
-    if (!data) {
-      data = estadoInicial();
-      await store.setJSON(KEY, data);
-    }
-    return new Response(JSON.stringify(data), { status: 200, headers: HEADERS });
+    const { data } = await cargarEstadoTenant(store, grupo, estadoInicial);
+    return new Response(JSON.stringify({ ...data, grupo }), { status: 200, headers: HEADERS });
   }
 
   if (req.method === "POST") {
     try {
       const body = await req.json();
-      const actual = (await store.get(KEY, { type: "json" })) || estadoInicial();
+      const { data: actual } = await cargarEstadoTenant(store, grupo, estadoInicial);
 
       if (body.type === "reemplazar") {
         const nuevo = { ...actual, ...body.data, updatedAt: new Date().toISOString() };
         await store.setJSON(KEY, nuevo);
-        return new Response(JSON.stringify(nuevo), { status: 200, headers: HEADERS });
+        return new Response(JSON.stringify({ ...nuevo, grupo }), { status: 200, headers: HEADERS });
       }
 
       if (body.type === "actualizar-matriz") {
@@ -59,7 +56,7 @@ export default async (req, context) => {
         );
         actual.updatedAt = new Date().toISOString();
         await store.setJSON(KEY, actual);
-        return new Response(JSON.stringify(actual), { status: 200, headers: HEADERS });
+        return new Response(JSON.stringify({ ...actual, grupo }), { status: 200, headers: HEADERS });
       }
 
       if (body.type === "agregar-registro") {
@@ -70,14 +67,14 @@ export default async (req, context) => {
         actual.log = [registro, ...actual.log].slice(0, 2000);
         actual.updatedAt = new Date().toISOString();
         await store.setJSON(KEY, actual);
-        return new Response(JSON.stringify(actual), { status: 200, headers: HEADERS });
+        return new Response(JSON.stringify({ ...actual, grupo }), { status: 200, headers: HEADERS });
       }
 
       if (body.type === "borrar-registro") {
         actual.log = actual.log.filter((r) => r.id !== body.id);
         actual.updatedAt = new Date().toISOString();
         await store.setJSON(KEY, actual);
-        return new Response(JSON.stringify(actual), { status: 200, headers: HEADERS });
+        return new Response(JSON.stringify({ ...actual, grupo }), { status: 200, headers: HEADERS });
       }
 
       return new Response(JSON.stringify({ error: "Tipo de operacion no reconocido" }), {
