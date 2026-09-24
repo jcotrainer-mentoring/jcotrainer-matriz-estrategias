@@ -62,18 +62,39 @@ const TAREAS = {
 const FREQ_LABEL = { diario: "Diaria", semanal: "Semanal", mensual: "Mensual" };
 
 // ---------------------------------------------------------------
+// Multi-cliente (multi-tenant): identificador de grupo via ?g= en la URL.
+// Sin el parámetro, todo funciona igual que antes (grupo por defecto).
+// ---------------------------------------------------------------
+const GRUPO_RAW = new URLSearchParams(window.location.search).get("g") || "";
+const TIENE_GRUPO_EN_URL = GRUPO_RAW.trim() !== "";
+
+function withGrupo(url) {
+  if (!TIENE_GRUPO_EN_URL) return url;
+  const sep = url.includes("?") ? "&" : "?";
+  return `${url}${sep}g=${encodeURIComponent(GRUPO_RAW.trim())}`;
+}
+
+function claveLocal(base) {
+  // Namespacea las preferencias guardadas en este dispositivo por cliente,
+  // para que cambiar de link (?g=...) en el mismo navegador no mezcle
+  // el entrenador activo entre distintos clientes.
+  return TIENE_GRUPO_EN_URL ? `${base}::${GRUPO_RAW.trim().toLowerCase()}` : base;
+}
+
+// ---------------------------------------------------------------
 // Estado
 // ---------------------------------------------------------------
 let STATE = null;
 
 async function cargarEstado() {
-  const res = await fetch("/api/data");
+  const res = await fetch(withGrupo("/api/data"));
   STATE = await res.json();
   renderAll();
+  mostrarBadgeCliente();
 }
 
 async function enviar(body) {
-  const res = await fetch("/api/data", {
+  const res = await fetch(withGrupo("/api/data"), {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(body),
@@ -83,7 +104,18 @@ async function enviar(body) {
 }
 
 function entrenadorActivo() {
-  return localStorage.getItem("jco-entrenador") || (STATE?.entrenadores?.[0] ?? "Entrenador 1");
+  return localStorage.getItem(claveLocal("jco-entrenador")) || (STATE?.entrenadores?.[0] ?? "Entrenador 1");
+}
+
+function mostrarBadgeCliente() {
+  if (!TIENE_GRUPO_EN_URL) return; // sin parámetro: se ve exactamente igual que antes
+  const brandSub = document.querySelector(".brand-sub");
+  if (!brandSub || document.getElementById("badgeCliente")) return;
+  const badge = document.createElement("span");
+  badge.id = "badgeCliente";
+  badge.textContent = "Cliente: " + (STATE.grupo || GRUPO_RAW);
+  badge.style.cssText = "margin-left:10px;padding:2px 9px;border-radius:10px;background:#2E3640;color:#8BC53F;font-size:11px;font-family:'JetBrains Mono',monospace;vertical-align:middle;";
+  brandSub.insertAdjacentElement("afterend", badge);
 }
 
 // ---------------------------------------------------------------
@@ -151,7 +183,7 @@ function renderSelectorEntrenador() {
   const sel = document.getElementById("entrenadorActivo");
   const actual = entrenadorActivo();
   sel.innerHTML = STATE.entrenadores.map((e) => `<option ${e === actual ? "selected" : ""}>${e}</option>`).join("");
-  sel.onchange = () => localStorage.setItem("jco-entrenador", sel.value);
+  sel.onchange = () => localStorage.setItem(claveLocal("jco-entrenador"), sel.value);
 }
 
 // ---------------------------------------------------------------
@@ -480,7 +512,7 @@ async function intentarCargarKpis(clave, { silencioso = false } = {}) {
   const btn = document.getElementById("btnDesbloquear");
   if (!silencioso) { btn.textContent = "Verificando..."; btn.disabled = true; }
   try {
-    const res = await fetch("/api/kpis", { headers: { "x-coach-key": clave } });
+    const res = await fetch(withGrupo("/api/kpis"), { headers: { "x-coach-key": clave } });
     const data = await res.json();
     if (res.ok) {
       localStorage.setItem("jco-coach-key", clave);
@@ -701,7 +733,7 @@ document.getElementById("btnEnviarCorreo").addEventListener("click", async () =>
   btn.textContent = "Enviando...";
   btn.disabled = true;
   try {
-    const res = await fetch("/api/enviar-informe", {
+    const res = await fetch(withGrupo("/api/enviar-informe"), {
       method: "POST",
       headers: { "Content-Type": "application/json", "x-coach-key": claveCoachGuardada() },
       body: JSON.stringify({ destinatario, entrenador: sel || null }),
