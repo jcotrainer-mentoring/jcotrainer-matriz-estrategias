@@ -17,6 +17,21 @@ function pct(cumplidas, total) {
   return total === 0 ? 0 : Math.round((cumplidas / total) * 1000) / 10;
 }
 
+export const RESULTADOS = ["Sin resultado", "Interés generado", "Cliente convertido"];
+
+function resultadosDe(rows) {
+  const cumplidas = rows.filter((r) => r.estado === "Cumplida");
+  return {
+    sinResultado: cumplidas.filter((r) => (r.resultado || "Sin resultado") === "Sin resultado").length,
+    interes: cumplidas.filter((r) => r.resultado === "Interés generado").length,
+    conversion: cumplidas.filter((r) => r.resultado === "Cliente convertido").length,
+  };
+}
+
+export function formatCLP(valor) {
+  return "$" + Math.round(valor || 0).toLocaleString("es-CL");
+}
+
 function weekStart(dateStr) {
   const d = new Date(dateStr + "T00:00:00");
   const day = d.getDay();
@@ -79,7 +94,7 @@ function porEstrategiaDe(rows) {
   return out;
 }
 
-function generarFeedback({ nombre, total, cumplidas, pctEnt, teamPct, porEstrategia, tendencia, proyeccionPct }) {
+function generarFeedback({ nombre, total, cumplidas, pctEnt, teamPct, porEstrategia, tendencia, proyeccionPct, resultados, valorPorCliente }) {
   const lines = [];
   if (total === 0) {
     lines.push(`${nombre} aún no tiene registros en el tablero. Anímalo(a) a empezar a marcar sus tareas para poder darle seguimiento real.`);
@@ -106,6 +121,16 @@ function generarFeedback({ nombre, total, cumplidas, pctEnt, teamPct, porEstrate
   else if (tendencia === "baja") lines.push("Tendencia: su cumplimiento viene bajando en las últimas semanas — conviene revisar qué cambió.");
   else if (tendencia !== "sin datos") lines.push("Tendencia: su cumplimiento se ha mantenido estable en las últimas semanas.");
 
+  if (resultados && (resultados.interes > 0 || resultados.conversion > 0)) {
+    let linea = `Resultados: ${resultados.interes} interacciones generaron interés y ${resultados.conversion} se convirtieron en clientes nuevos.`;
+    if (resultados.conversion > 0 && valorPorCliente > 0) {
+      linea += ` Valor estimado aportado: ${formatCLP(resultados.conversion * valorPorCliente)}.`;
+    }
+    lines.push(linea);
+  } else if (resultados && cumplidas > 0) {
+    lines.push("Todavía no registra resultados (interés o conversión) en sus tareas cumplidas — vale la pena reforzar el hábito de marcarlos.");
+  }
+
   lines.push(`Proyección próxima semana: cerca de ${proyeccionPct}% de cumplimiento si continúa el ritmo actual.`);
   return lines;
 }
@@ -113,6 +138,7 @@ function generarFeedback({ nombre, total, cumplidas, pctEnt, teamPct, porEstrate
 export function computeKpis(state) {
   const log = state.log || [];
   const entrenadores = state.entrenadores || [];
+  const valorPorCliente = Number(state.config?.valorPorCliente) || 0;
 
   const totalEquipo = log.length;
   const cumplidasEquipo = log.filter((r) => r.estado === "Cumplida").length;
@@ -120,6 +146,8 @@ export function computeKpis(state) {
   const porEstrategiaEquipo = porEstrategiaDe(log);
   const serieEquipo = serieSemanal(log);
   const proyeccionEquipo = proyectar(serieEquipo);
+  const resultadosEquipo = resultadosDe(log);
+  const valorEstimadoEquipo = resultadosEquipo.conversion * valorPorCliente;
 
   const porEntrenador = entrenadores.map((nombre) => {
     const rows = log.filter((r) => r.entrenador === nombre);
@@ -131,13 +159,16 @@ export function computeKpis(state) {
     const porEstrategia = porEstrategiaDe(rows);
     const serie = serieSemanal(rows);
     const proyeccion = proyectar(serie);
+    const resultados = resultadosDe(rows);
+    const valorEstimado = resultados.conversion * valorPorCliente;
     const feedback = generarFeedback({
       nombre, total, cumplidas, pctEnt, teamPct: pctEquipo,
       porEstrategia, tendencia: proyeccion.tendencia, proyeccionPct: proyeccion.proyeccionPct,
+      resultados, valorPorCliente,
     });
     return {
       nombre, total, cumplidas, noCumplidas, pendientes, pct: pctEnt,
-      porEstrategia, serieSemanal: serie, proyeccion, feedback,
+      porEstrategia, serieSemanal: serie, proyeccion, resultados, valorEstimado, feedback,
     };
   });
 
@@ -145,11 +176,13 @@ export function computeKpis(state) {
 
   return {
     generadoEn: new Date().toISOString(),
+    valorPorCliente,
     equipo: {
       total: totalEquipo, cumplidas: cumplidasEquipo, pct: pctEquipo,
       porEstrategia: porEstrategiaEquipo, serieSemanal: serieEquipo, proyeccion: proyeccionEquipo,
+      resultados: resultadosEquipo, valorEstimado: valorEstimadoEquipo,
     },
     porEntrenador,
-    ranking: ranking.map((r, i) => ({ posicion: i + 1, nombre: r.nombre, pct: r.pct, total: r.total })),
+    ranking: ranking.map((r, i) => ({ posicion: i + 1, nombre: r.nombre, pct: r.pct, total: r.total, conversion: r.resultados.conversion })),
   };
 }
