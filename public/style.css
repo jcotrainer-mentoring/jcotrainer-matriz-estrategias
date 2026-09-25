@@ -204,6 +204,8 @@ h2 {
 .config-row { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; margin-bottom: 18px; }
 .config-row label { font-size: 13px; color: var(--steel); }
 .config-row input { width: 140px; }
+.acciones-cliente { display: flex; flex-wrap: wrap; gap: 6px; }
+.acciones-cliente .btn { padding: 6px 10px; font-size: 12px; }
 
 /* ---------- Task list ---------- */
 .task-list { display: flex; flex-direction: column; gap: 12px; }
