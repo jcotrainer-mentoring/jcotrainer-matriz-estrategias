@@ -13,7 +13,7 @@ function estadoInicial() {
     })),
     log: [],
     entrenadores: ["Entrenador 1", "Entrenador 2", "Entrenador 3", "Entrenador 4"],
-    config: { valorPorCliente: 0 },
+    config: { valorPorCliente: 0, peak: [[7, 9], [18, 21]] },
     updatedAt: null,
   };
 }
@@ -46,6 +46,11 @@ export default async (req, context) => {
 
       if (body.type === "reemplazar") {
         const nuevo = { ...actual, ...body.data, updatedAt: new Date().toISOString() };
+        // config se mezcla (no se reemplaza entera): así guardar el valor por
+        // cliente no borra el horario peak, y viceversa.
+        if (body.data && body.data.config) {
+          nuevo.config = { ...(actual.config || {}), ...body.data.config };
+        }
         await store.setJSON(KEY, nuevo);
         return new Response(JSON.stringify({ ...nuevo, grupo }), { status: 200, headers: HEADERS });
       }
@@ -62,6 +67,9 @@ export default async (req, context) => {
 
       if (body.type === "actualizar-registro") {
         const { id, campo, valor } = body;
+        if (campo === "hora" && valor !== "" && !/^([01]\d|2[0-3]):[0-5]\d$/.test(String(valor))) {
+          return new Response(JSON.stringify({ error: "Hora inválida (usa HH:MM)" }), { status: 400, headers: HEADERS });
+        }
         actual.log = actual.log.map((r) =>
           r.id === id ? { ...r, [campo]: valor } : r
         );
