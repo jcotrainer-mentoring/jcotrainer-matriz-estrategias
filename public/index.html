@@ -51,22 +51,24 @@
       <div class="info-card">
         <span class="info-card-num">02</span>
         <h3>Diario / Semanal / Mensual</h3>
-        <p>Checklist de tareas según su frecuencia. Marca "Cumplida" o "No cumplida" con un toque y queda registrado con fecha y entrenador.</p>
+        <p>Checklist de tareas según su frecuencia. Marca "Cumplida" o "No cumplida" con un toque y queda registrado con fecha, hora y entrenador.</p>
       </div>
       <div class="info-card">
         <span class="info-card-num">03</span>
         <h3>Seguimiento</h3>
-        <p>Panel con el % de cumplimiento por estrategia y por entrenador, calculado automáticamente a partir de todos los registros del equipo.</p>
+        <p>Panel con el % de cumplimiento por estrategia y por entrenador, más el mapa de horario del equipo, calculado automáticamente a partir de todos los registros.</p>
       </div>
     </div>
 
     <h2>Cómo usarla</h2>
     <ol class="steps">
       <li>Selecciona tu nombre en <strong>"Estoy trabajando como"</strong>, arriba a la derecha. Se recuerda en este dispositivo.</li>
-      <li>Ve a <strong>Diario</strong>, <strong>Semanal</strong> o <strong>Mensual</strong> y marca cada tarea como cumplida o no cumplida cuando corresponda.</li>
+      <li>Ve a <strong>Diario</strong>, <strong>Semanal</strong> o <strong>Mensual</strong> y marca cada tarea como cumplida o no cumplida <strong>en el momento en que la haces</strong>. La hora del registro alimenta el mapa de horario: si marcas todo al final del turno, el mapa muestra tu hora de salida y no cuándo aplicaste realmente la estrategia.</li>
       <li>En <strong>Matriz</strong>, actualiza el estado general de cada estrategia y deja notas si es necesario.</li>
       <li>Revisa <strong>Seguimiento</strong> para ver el avance del equipo y detectar qué estrategia necesita reforzarse.</li>
+      <li>Si olvidaste marcar una tarea en el momento, corrige su hora en <strong>Seguimiento → Últimos registros</strong>.</li>
     </ol>
+    <p class="note">Cada estrategia tiene un horario ideal. Las de contacto (vitrina, check-in, corrección técnica, ayuda operativa, alumno perdido o motivado) rinden más en el <strong>horario peak</strong>, con el gimnasio lleno. El mini-diagnóstico y la conversación con un cliente estancado funcionan mejor en <strong>horario valle</strong>, cuando hay tiempo para conversar.</p>
     <p class="note">Todo lo que registra un entrenador lo ven los demás: los datos se guardan en un mismo tablero compartido (Netlify Blobs), no en el navegador de cada persona.</p>
   </section>
 
@@ -115,6 +117,15 @@
       <table class="data-table" id="tablaEntrenadores"></table>
     </div>
 
+    <h2>Horario de actividad del equipo</h2>
+    <p class="lead" style="margin-bottom:14px">Cuándo se están cumpliendo las tareas (día × hora). Las horas marcadas en naranjo son el horario peak del gimnasio: <span id="peakTextoSeguimiento"></span>.</p>
+    <div class="rings-row" id="horarioStatsEquipo"></div>
+    <div class="table-wrap heatmap-wrap"><table class="heatmap" id="heatmapEquipo"></table></div>
+    <div class="heatmap-legend" id="heatmapLegendEquipo"></div>
+    <div class="table-wrap" style="margin-top:14px">
+      <table class="data-table" id="tablaHorarioEquipo"></table>
+    </div>
+
     <h2>Últimos registros</h2>
     <div class="table-wrap">
       <table class="data-table" id="tablaLog"></table>
@@ -143,6 +154,12 @@
         <input type="number" id="valorPorClienteInput" min="0" step="1000" placeholder="Ej: 50000" />
         <button class="btn btn-ok" id="btnGuardarValorCliente" type="button">Guardar</button>
       </div>
+      <div class="config-row">
+        <label for="peakInput">Horario peak de este gimnasio</label>
+        <input type="text" id="peakInput" class="input-peak" placeholder="07-09, 18-21" />
+        <button class="btn btn-ok" id="btnGuardarPeak" type="button">Guardar</button>
+        <span class="config-hint">Formato: desde-hasta en horas, separado por comas. "07-09, 18-21" = de 07:00 a 08:59 y de 18:00 a 20:59.</span>
+      </div>
       <div class="informes-toolbar">
         <div>
           <label for="selectorInforme">Ver informe de</label>
@@ -170,6 +187,14 @@
 
         <h2 id="tituloTendencia">Evolución semanal y proyección</h2>
         <div class="chart-card"><canvas id="chartTendencia" height="120"></canvas></div>
+
+        <h2 id="tituloHorario">Horario de actividad</h2>
+        <div class="rings-row" id="horarioStatsInforme"></div>
+        <div class="table-wrap heatmap-wrap"><table class="heatmap" id="heatmapInforme"></table></div>
+        <div class="heatmap-legend" id="heatmapLegendInforme"></div>
+        <div class="table-wrap" style="margin-top:14px">
+          <table class="data-table" id="tablaHorarioInforme"></table>
+        </div>
 
         <div id="bloqueEstrategiaEnt" hidden>
           <h2>Cumplimiento por estrategia</h2>
