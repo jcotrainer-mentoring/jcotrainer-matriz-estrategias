@@ -142,15 +142,27 @@ function insertarTabInformes() {
   tabs.appendChild(btn);
 }
 
+function insertarTabClientes() {
+  if (document.querySelector('.tab[data-tab="clientes"]')) return; // ya insertada
+  const tabs = document.getElementById("tabs");
+  const btn = document.createElement("button");
+  btn.className = "tab";
+  btn.dataset.tab = "clientes";
+  btn.textContent = "Clientes";
+  tabs.appendChild(btn);
+}
+
 function revelarPestanaCoach() {
   localStorage.setItem(FLAG_TAB_VISIBLE, "1");
   insertarTabInformes();
+  insertarTabClientes();
   toast("Pestaña de Informes activada en este dispositivo");
 }
 
 // Gatillo 1: ya se activó antes en este dispositivo
 if (localStorage.getItem(FLAG_TAB_VISIBLE) === "1") {
   insertarTabInformes();
+  insertarTabClientes();
 }
 
 // Gatillo 2: entrar con ?coach=1 en la URL (por ejemplo, desde un link guardado)
@@ -183,6 +195,7 @@ document.getElementById("tabs").addEventListener("click", (e) => {
   btn.classList.add("active");
   document.getElementById("panel-" + btn.dataset.tab).classList.add("active");
   if (btn.dataset.tab === "informes") mostrarEstadoInformes();
+  if (btn.dataset.tab === "clientes") mostrarEstadoClientes();
 });
 
 // ---------------------------------------------------------------
@@ -579,6 +592,8 @@ document.getElementById("btnCerrarSesionCoach").addEventListener("click", () => 
   mostrarCandado();
   const tabInformes = document.querySelector('.tab[data-tab="informes"]');
   if (tabInformes) tabInformes.remove();
+  const tabClientes = document.querySelector('.tab[data-tab="clientes"]');
+  if (tabClientes) tabClientes.remove();
   document.querySelectorAll(".tab").forEach((t) => t.classList.remove("active"));
   document.querySelectorAll(".panel").forEach((p) => p.classList.remove("active"));
   document.querySelector('.tab[data-tab="instrucciones"]').classList.add("active");
@@ -828,3 +843,154 @@ function abrirBorradorCorreo(destinatario, entrenadorSeleccionado) {
   const link = `mailto:${encodeURIComponent(destinatario)}?subject=${encodeURIComponent(asunto)}&body=${encodeURIComponent(cuerpo)}`;
   window.location.href = link;
 }
+
+// =================================================================
+// CLIENTES — panel maestro cross-cliente (solo coach, ?g= agregado)
+// =================================================================
+let PANEL_MAESTRO = null;
+
+function mostrarEstadoClientes() {
+  const clave = claveCoachGuardada();
+  if (clave) {
+    document.getElementById("clientesSinClave").hidden = true;
+    document.getElementById("clientesContenido").hidden = false;
+    cargarPanelMaestro(clave);
+  } else {
+    document.getElementById("clientesSinClave").hidden = false;
+    document.getElementById("clientesContenido").hidden = true;
+  }
+}
+
+document.getElementById("btnIrAInformes").addEventListener("click", () => {
+  document.querySelectorAll(".tab").forEach((t) => t.classList.remove("active"));
+  document.querySelectorAll(".panel").forEach((p) => p.classList.remove("active"));
+  document.querySelector('.tab[data-tab="informes"]').classList.add("active");
+  document.getElementById("panel-informes").classList.add("active");
+  mostrarEstadoInformes();
+});
+
+async function cargarPanelMaestro(clave) {
+  try {
+    const res = await fetch("/api/panel-maestro", { headers: { "x-coach-key": clave } });
+    const data = await res.json();
+    if (res.ok) {
+      PANEL_MAESTRO = data;
+      renderPanelMaestro();
+    } else {
+      toast("No se pudo cargar el panel de clientes");
+    }
+  } catch (err) {
+    toast("No se pudo cargar el panel de clientes");
+    console.error(err);
+  }
+}
+
+async function enviarClientes(body) {
+  const res = await fetch("/api/clientes", {
+    method: "POST",
+    headers: { "Content-Type": "application/json", "x-coach-key": claveCoachGuardada() },
+    body: JSON.stringify(body),
+  });
+  return res.json();
+}
+
+function renderPanelMaestro() {
+  if (!PANEL_MAESTRO) return;
+  const { clientes, totales } = PANEL_MAESTRO;
+
+  document.getElementById("clientesStats").innerHTML =
+    renderStatCard("Clientes activos", totales.clientesActivos) +
+    renderStatCard("Registros totales", totales.totalRegistros) +
+    renderStatCard("Conversiones totales", totales.totalConversiones) +
+    renderStatCard("Valor estimado total", formatCLP(totales.valorEstimadoTotal)) +
+    renderStatCard("Clientes en riesgo", totales.enRiesgo);
+
+  const filas = clientes.map((c) => `<tr ${c.enRiesgo ? 'style="outline:1px solid #E8564B;"' : ""}>
+      <td>${c.nombreVisible}${c.activo ? "" : ' <span class="badge badge-No-cumplida">Archivado</span>'}</td>
+      <td>${c.total}</td>
+      <td><div class="bar-cell"><div class="bar-track"><div class="bar-fill" style="width:${c.pct}%;background:${colorPct(c.pct)}"></div></div><span>${c.pct}%</span></div></td>
+      <td>${c.resultados.conversion}</td>
+      <td>${formatCLP(c.valorEstimado)}</td>
+      <td>${c.enRiesgo ? "⚠ En riesgo" : "OK"}</td>
+      <td class="acciones-cliente">
+        <a class="btn btn-ghost" href="/?g=${encodeURIComponent(c.grupo)}" target="_blank" rel="noopener">Abrir</a>
+        <button class="btn btn-ghost" data-editar="${c.grupo}" type="button">Editar</button>
+        <button class="btn btn-ghost" data-archivar="${c.grupo}" data-activo="${c.activo}" type="button">${c.activo ? "Archivar" : "Reactivar"}</button>
+        <button class="btn btn-ghost" data-eliminar="${c.grupo}" type="button">Quitar</button>
+      </td>
+    </tr>`).join("") || `<tr><td colspan="7" style="color:var(--steel)">Aún no registras clientes. Usa "+ Agregar cliente".</td></tr>`;
+
+  document.getElementById("tablaClientes").innerHTML = `
+    <tr><th>Cliente</th><th>Registros</th><th>% Cumplimiento</th><th>Conversiones</th><th>Valor estimado</th><th>Estado</th><th></th></tr>
+    ${filas}`;
+
+  document.getElementById("tablaClientes").querySelectorAll("[data-editar]").forEach((btn) => {
+    btn.addEventListener("click", () => abrirModalCliente(btn.dataset.editar));
+  });
+  document.getElementById("tablaClientes").querySelectorAll("[data-archivar]").forEach((btn) => {
+    btn.addEventListener("click", async () => {
+      const activo = btn.dataset.activo === "true";
+      await enviarClientes({ type: "editar", grupo: btn.dataset.archivar, campo: "activo", valor: !activo });
+      cargarPanelMaestro(claveCoachGuardada());
+      toast(activo ? "Cliente archivado" : "Cliente reactivado");
+    });
+  });
+  document.getElementById("tablaClientes").querySelectorAll("[data-eliminar]").forEach((btn) => {
+    btn.addEventListener("click", async () => {
+      if (!confirm(`¿Quitar "${btn.dataset.eliminar}" del panel? (sus datos no se borran, solo deja de aparecer aquí)`)) return;
+      await enviarClientes({ type: "eliminar", grupo: btn.dataset.eliminar });
+      cargarPanelMaestro(claveCoachGuardada());
+      toast("Cliente quitado del panel");
+    });
+  });
+}
+
+function abrirModalCliente(grupoExistente) {
+  const modal = document.getElementById("modalCliente");
+  const esEdicion = !!grupoExistente;
+  document.getElementById("modalClienteTitulo").textContent = esEdicion ? "Editar cliente" : "Agregar cliente";
+  const grupoInput = document.getElementById("clienteGrupoInput");
+  const nombreInput = document.getElementById("clienteNombreInput");
+  const notasInput = document.getElementById("clienteNotasInput");
+  grupoInput.disabled = esEdicion;
+  if (esEdicion) {
+    const c = PANEL_MAESTRO.clientes.find((x) => x.grupo === grupoExistente);
+    grupoInput.value = c.grupo;
+    nombreInput.value = c.nombreVisible;
+    notasInput.value = c.notas;
+  } else {
+    grupoInput.value = "";
+    nombreInput.value = "";
+    notasInput.value = "";
+  }
+  modal.dataset.editando = esEdicion ? grupoExistente : "";
+  modal.hidden = false;
+}
+
+document.getElementById("btnAgregarCliente").addEventListener("click", () => abrirModalCliente(null));
+document.getElementById("btnCerrarModalCliente").addEventListener("click", () => {
+  document.getElementById("modalCliente").hidden = true;
+});
+document.getElementById("modalCliente").addEventListener("click", (e) => {
+  if (e.target.id === "modalCliente") document.getElementById("modalCliente").hidden = true;
+});
+
+document.getElementById("btnGuardarCliente").addEventListener("click", async () => {
+  const modal = document.getElementById("modalCliente");
+  const editando = modal.dataset.editando;
+  const grupo = document.getElementById("clienteGrupoInput").value.trim();
+  const nombreVisible = document.getElementById("clienteNombreInput").value.trim();
+  const notas = document.getElementById("clienteNotasInput").value.trim();
+  if (!grupo) { toast("Escribe el identificador del cliente"); return; }
+
+  if (editando) {
+    await enviarClientes({ type: "editar", grupo: editando, campo: "nombreVisible", valor: nombreVisible });
+    await enviarClientes({ type: "editar", grupo: editando, campo: "notas", valor: notas });
+  } else {
+    const resp = await enviarClientes({ type: "agregar", grupo, nombreVisible, notas });
+    if (resp.error === "ya-existe") { toast("Ese identificador ya está registrado"); return; }
+  }
+  modal.hidden = true;
+  cargarPanelMaestro(claveCoachGuardada());
+  toast(editando ? "Cliente actualizado" : "Cliente agregado");
+});
