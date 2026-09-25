@@ -338,6 +338,78 @@ function renderStatCard(label, value) {
   </div>`;
 }
 
+// ---------------------------------------------------------------
+// Gamificación (versión cliente, visible para todo el equipo en
+// Seguimiento). Usa los mismos umbrales que el cálculo del servidor
+// en lib/kpis.js para que los números coincidan con Informes/PDF/correo.
+// ---------------------------------------------------------------
+const RACHA_UMBRAL_PCT = 60;
+
+function weekStartLocal(fechaStr) {
+  const d = new Date(fechaStr + "T00:00:00");
+  const day = d.getDay();
+  const diff = day === 0 ? -6 : 1 - day;
+  d.setDate(d.getDate() + diff);
+  return d.toISOString().slice(0, 10);
+}
+
+function serieSemanalLocal(rows) {
+  const porSemana = {};
+  rows.forEach((r) => {
+    const w = weekStartLocal(r.fecha);
+    if (!porSemana[w]) porSemana[w] = { cumplidas: 0, total: 0 };
+    porSemana[w].total += 1;
+    if (r.estado === "Cumplida") porSemana[w].cumplidas += 1;
+  });
+  return Object.keys(porSemana).sort().map((w) => ({
+    total: porSemana[w].total,
+    pct: pct(porSemana[w].cumplidas, porSemana[w].total),
+  }));
+}
+
+function rachaLocal(rows) {
+  const serie = serieSemanalLocal(rows);
+  let racha = 0;
+  for (let i = serie.length - 1; i >= 0; i--) {
+    if (serie[i].total > 0 && serie[i].pct >= RACHA_UMBRAL_PCT) racha += 1;
+    else break;
+  }
+  return racha;
+}
+
+function insigniasLocal(rows, esLider) {
+  const cumplidas = rows.filter((r) => r.estado === "Cumplida");
+  const total = rows.length;
+  const racha = rachaLocal(rows);
+  const conversion = cumplidas.filter((r) => r.resultado === "Cliente convertido").length;
+
+  const porEstrategia = [];
+  for (let n = 1; n <= 10; n++) {
+    const rs = rows.filter((r) => r.estrategia === n);
+    const c = rs.filter((r) => r.estado === "Cumplida").length;
+    porEstrategia.push({ total: rs.length, cumplidas: c, pct: pct(c, rs.length) });
+  }
+  const cumplidasPorEstrategia = porEstrategia.map((e) => e.cumplidas);
+  const totalCumplidas = cumplidasPorEstrategia.reduce((s, c) => s + c, 0);
+  const cobertura = cumplidasPorEstrategia.filter((c) => c > 0).length;
+  const top2 = [...cumplidasPorEstrategia].sort((a, b) => b - a).slice(0, 2).reduce((s, c) => s + c, 0);
+  const concentracionTop2Pct = totalCumplidas === 0 ? 0 : Math.round((top2 / totalCumplidas) * 100);
+  const equilibrado = totalCumplidas >= 10 && cobertura >= 6 && concentracionTop2Pct <= 50;
+  const dominadas = porEstrategia.filter((e) => e.total >= 3 && e.pct >= 80).length;
+
+  const insignias = [];
+  if (racha >= 10) insignias.push("🔥 10+ sem.");
+  else if (racha >= 6) insignias.push("🔥 6+ sem.");
+  else if (racha >= 3) insignias.push("🔥 3+ sem.");
+  if (dominadas >= 3) insignias.push(`🎯 ${dominadas} dominadas`);
+  else if (dominadas >= 1) insignias.push("🎯 Dominada");
+  if (equilibrado) insignias.push("⚖️ Equilibrado");
+  if (conversion >= 5) insignias.push("💎 5+ conversiones");
+  else if (conversion >= 1) insignias.push("💰 Conversión");
+  if (esLider && total >= 5) insignias.push("🏆 Líder");
+  return { racha, insignias };
+}
+
 function renderSeguimiento() {
   const log = STATE.log;
   const totalCumplidas = log.filter((r) => r.estado === "Cumplida").length;
@@ -377,6 +449,13 @@ function renderSeguimiento() {
     ${filasEstr}`;
 
   // Tabla por entrenador
+  const pctPorEntrenador = STATE.entrenadores.map((ent) => {
+    const rows = log.filter((r) => r.entrenador === ent);
+    const c = rows.filter((r) => r.estado === "Cumplida").length;
+    return { ent, pct: pct(c, rows.length), total: rows.length };
+  });
+  const lider = pctPorEntrenador.filter((e) => e.total > 0).sort((a, b) => b.pct - a.pct || b.total - a.total)[0];
+
   const filasEnt = STATE.entrenadores.map((ent) => {
     const rows = log.filter((r) => r.entrenador === ent);
     const c = rows.filter((r) => r.estado === "Cumplida").length;
@@ -385,6 +464,7 @@ function renderSeguimiento() {
     const p = pct(c, t);
     const interes = rows.filter((r) => r.estado === "Cumplida" && r.resultado === "Interés generado").length;
     const conversion = rows.filter((r) => r.estado === "Cumplida" && r.resultado === "Cliente convertido").length;
+    const { racha, insignias } = insigniasLocal(rows, lider && lider.ent === ent);
     return `<tr>
       <td>${ent}</td>
       <td>${c}</td>
@@ -393,10 +473,12 @@ function renderSeguimiento() {
       <td><div class="bar-cell"><div class="bar-track"><div class="bar-fill" style="width:${p}%"></div></div><span>${p}%</span></div></td>
       <td>${interes}</td>
       <td>${conversion}</td>
+      <td>${racha > 0 ? "🔥 " + racha + " sem." : "—"}</td>
+      <td>${insignias.length ? insignias.join(" ") : "—"}</td>
     </tr>`;
   }).join("");
   document.getElementById("tablaEntrenadores").innerHTML = `
-    <tr><th>Entrenador</th><th>Cumplidas</th><th>No cumplidas</th><th>Total</th><th>% Cumplimiento</th><th>Interés</th><th>Conversión</th></tr>
+    <tr><th>Entrenador</th><th>Cumplidas</th><th>No cumplidas</th><th>Total</th><th>% Cumplimiento</th><th>Interés</th><th>Conversión</th><th>Racha</th><th>Insignias</th></tr>
     ${filasEnt}`;
 
   // Log reciente
@@ -647,17 +729,19 @@ function renderInforme(entrenadorSeleccionado) {
     renderStatCard("Tendencia", { alza: "↑ Al alza", baja: "↓ A la baja", estable: "→ Estable", "sin datos": "Sin datos" }[datosScope.proyeccion.tendencia] || "—") +
     renderStatCard("Interés generado", datosScope.resultados.interes) +
     renderStatCard("Clientes convertidos", datosScope.resultados.conversion) +
-    renderStatCard("Valor estimado generado", formatCLP(datosScope.valorEstimado));
+    renderStatCard("Valor estimado generado", formatCLP(datosScope.valorEstimado)) +
+    (esEquipo ? "" : renderStatCard("Racha actual", ent.racha > 0 ? "🔥 " + ent.racha + " sem." : "0 sem."));
 
   // --- Ranking (siempre equipo completo) ---
   document.getElementById("tablaRanking").innerHTML = `
-    <tr><th>#</th><th>Entrenador</th><th>Registros</th><th>% Cumplimiento</th><th>Conversiones</th></tr>
+    <tr><th>#</th><th>Entrenador</th><th>Registros</th><th>% Cumplimiento</th><th>Conversiones</th><th>Racha</th></tr>
     ${KPIS.ranking.map((r) => `<tr ${r.nombre === entrenadorSeleccionado ? 'style="outline:2px solid #8BC53F;"' : ""}>
       <td>${r.posicion}</td>
       <td>${r.nombre}</td>
       <td>${r.total}</td>
       <td><div class="bar-cell"><div class="bar-track"><div class="bar-fill" style="width:${r.pct}%;background:${colorPct(r.pct)}"></div></div><span>${r.pct}%</span></div></td>
       <td>${r.conversion}</td>
+      <td>${r.racha > 0 ? "🔥 " + r.racha : "—"}</td>
     </tr>`).join("")}`;
 
   // --- Gráfico comparación entre entrenadores ---
@@ -712,9 +796,11 @@ function renderInforme(entrenadorSeleccionado) {
   // --- Comparación por estrategia (solo si hay entrenador seleccionado) ---
   const bloqueEstrategia = document.getElementById("bloqueEstrategiaEnt");
   const bloqueFeedback = document.getElementById("bloqueFeedback");
+  const bloqueInsignias = document.getElementById("bloqueInsignias");
   if (esEquipo) {
     bloqueEstrategia.hidden = true;
     bloqueFeedback.hidden = true;
+    bloqueInsignias.hidden = true;
   } else {
     bloqueEstrategia.hidden = false;
     bloqueFeedback.hidden = false;
@@ -733,6 +819,15 @@ function renderInforme(entrenadorSeleccionado) {
     });
 
     document.getElementById("listaFeedback").innerHTML = ent.feedback.map((f) => `<li>${f}</li>`).join("");
+
+    if (ent.insignias.length) {
+      bloqueInsignias.hidden = false;
+      document.getElementById("listaInsignias").innerHTML = ent.insignias.map((i) =>
+        `<span class="insignia-chip"><span class="icono">${i.icono}</span>${i.label}</span>`
+      ).join("");
+    } else {
+      bloqueInsignias.hidden = true;
+    }
   }
 }
 
@@ -835,9 +930,11 @@ function abrirBorradorCorreo(destinatario, entrenadorSeleccionado) {
   cuerpo += `Cumplimiento: ${datos.pct}%\nRegistros totales: ${datos.total}\nProyección próxima semana: ${datos.proyeccion.proyeccionPct}%\n`;
   cuerpo += `Interés generado: ${datos.resultados.interes}\nClientes convertidos: ${datos.resultados.conversion}\nValor estimado generado: ${formatCLP(datos.valorEstimado)}\n\n`;
   if (!esEquipo) {
-    cuerpo += "Feedback:\n" + datos.feedback.map((f) => "- " + f).join("\n") + "\n\n";
+    cuerpo += `Racha actual: ${datos.racha > 0 ? datos.racha + " semanas" : "sin racha activa"}\n`;
+    if (datos.insignias.length) cuerpo += "Insignias: " + datos.insignias.map((i) => i.icono + " " + i.label).join(", ") + "\n";
+    cuerpo += "\nFeedback:\n" + datos.feedback.map((f) => "- " + f).join("\n") + "\n\n";
   } else {
-    cuerpo += "Ranking:\n" + KPIS.ranking.map((r) => `${r.posicion}. ${r.nombre} — ${r.pct}% (${r.total} registros)`).join("\n") + "\n\n";
+    cuerpo += "Ranking:\n" + KPIS.ranking.map((r) => `${r.posicion}. ${r.nombre} — ${r.pct}% (${r.total} registros)${r.racha > 0 ? " · racha " + r.racha + " sem." : ""}`).join("\n") + "\n\n";
   }
   cuerpo += "(Adjunta el PDF descargado desde el botón \"Descargar PDF\" si quieres incluir los gráficos.)";
   const link = `mailto:${encodeURIComponent(destinatario)}?subject=${encodeURIComponent(asunto)}&body=${encodeURIComponent(cuerpo)}`;
