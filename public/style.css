@@ -206,6 +206,13 @@ h2 {
 .config-row input { width: 140px; }
 .acciones-cliente { display: flex; flex-wrap: wrap; gap: 6px; }
 .acciones-cliente .btn { padding: 6px 10px; font-size: 12px; }
+.insignias-row { display: flex; flex-wrap: wrap; gap: 10px; margin-bottom: 8px; }
+.insignia-chip {
+  display: inline-flex; align-items: center; gap: 6px;
+  background: var(--panel-2); border: 1px solid var(--line); border-radius: 999px;
+  padding: 8px 14px; font-size: 13px;
+}
+.insignia-chip .icono { font-size: 16px; }
 
 /* ---------- Task list ---------- */
 .task-list { display: flex; flex-direction: column; gap: 12px; }
