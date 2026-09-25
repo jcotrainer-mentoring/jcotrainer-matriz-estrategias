@@ -76,7 +76,7 @@ body {
 }
 .whoami label { font-family: var(--mono); text-transform: uppercase; letter-spacing: .5px; font-size: 11px; }
 
-select, input[type=text], input[type=date], textarea {
+select, input[type=text], input[type=date], input[type=time], textarea {
   background: var(--panel-2);
   border: 1px solid var(--line);
   color: var(--chalk);
@@ -346,3 +346,68 @@ h2 {
   .matriz-grid .matriz-card { grid-template-columns: 1fr; }
   .matriz-num { display: none; }
 }
+
+/* ---------- Horario: heatmap dÃ­a Ã— hora ---------- */
+.heatmap-wrap { padding: 12px; }
+.heatmap { border-collapse: separate; border-spacing: 3px; margin: 0 auto; }
+.heatmap th {
+  font-family: var(--mono);
+  font-size: 10px;
+  font-weight: 600;
+  color: var(--steel);
+  padding: 2px 0;
+  text-align: center;
+}
+.heatmap th.hm-dia { text-align: right; padding-right: 8px; font-family: var(--body); font-size: 12px; }
+.heatmap th.hm-peak { color: var(--amber); border-bottom: 2px solid var(--amber); }
+.heatmap td {
+  width: 30px;
+  min-width: 26px;
+  height: 26px;
+  border-radius: 5px;
+  background: var(--panel-2);
+  text-align: center;
+  font-family: var(--mono);
+  font-size: 11px;
+  font-weight: 700;
+  color: var(--chalk);
+}
+.heatmap td.hm-col-peak { background: var(--amber-dim); }
+.heatmap-legend {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 14px;
+  margin-top: 10px;
+  font-size: 12px;
+  color: var(--steel);
+}
+.heatmap-legend .hm-swatch {
+  display: inline-block;
+  width: 14px;
+  height: 14px;
+  border-radius: 3px;
+  vertical-align: middle;
+  margin-right: 6px;
+}
+.heatmap-vacio { color: var(--steel); font-size: 13px; padding: 14px; }
+.ideal-tag {
+  display: inline-block;
+  padding: 1px 8px;
+  border-radius: 10px;
+  font-size: 11px;
+  font-weight: 700;
+}
+.ideal-peak { background: var(--amber-dim); color: var(--amber); }
+.ideal-valle { background: var(--panel-2); color: var(--chalk); border: 1px solid var(--line); }
+.ideal-libre { color: var(--steel); }
+.input-peak { width: 150px !important; }
+.config-hint { font-size: 12px; color: var(--steel); flex-basis: 100%; }
+input.inp-hora {
+  color-scheme: dark;
+  width: 96px;
+  padding: 4px 6px;
+  font-family: var(--mono);
+  font-size: 12px;
+}
+input.inp-hora.sin-hora { border-color: var(--amber); }
