@@ -28,6 +28,97 @@ function resultadosDe(rows) {
   };
 }
 
+// ---------------------------------------------------------------
+// Horario: heatmap de actividad (día × hora) y cumplimiento del
+// "horario ideal" de cada estrategia según el horario peak del cliente.
+// Mantener sincronizado con HORARIO_IDEAL / PEAK_DEFAULT en public/app.js.
+// ---------------------------------------------------------------
+export const HORARIO_IDEAL = {
+  1: "peak",  // Contacto Técnico Profesional
+  2: "peak",  // Check-in de Progreso
+  3: "valle", // Mini-Diagnóstico Gratuito (requiere 2–3 min de conversación tranquila)
+  4: "valle", // Cliente con Estancamiento (conversación de replanteo)
+  5: "peak",  // Mala Técnica o Riesgo
+  6: "peak",  // Ayuda Operativa
+  7: "peak",  // Vitrina Profesional
+  8: null,    // Desafío de 1 Semana (sin horario ideal)
+  9: "peak",  // Cliente Ansioso o Perdido
+  10: "peak", // Alumno Motivado
+};
+
+// Ventanas [desde, hasta) en horas enteras. 7–9 = de 07:00 a 08:59.
+export const PEAK_DEFAULT = [[7, 9], [18, 21]];
+
+export function normalizarPeak(peak) {
+  if (!Array.isArray(peak)) return PEAK_DEFAULT;
+  const validas = peak
+    .map((v) => (Array.isArray(v) ? [Number(v[0]), Number(v[1])] : null))
+    .filter((v) => v && Number.isInteger(v[0]) && Number.isInteger(v[1]) && v[0] >= 0 && v[1] <= 24 && v[0] < v[1]);
+  return validas.length ? validas : PEAK_DEFAULT;
+}
+
+function esHoraPeak(h, peak) {
+  return peak.some(([desde, hasta]) => h >= desde && h < hasta);
+}
+
+function horaDe(r) {
+  if (typeof r.hora !== "string") return null;
+  const m = r.hora.match(/^(\d{1,2}):(\d{2})$/);
+  if (!m) return null;
+  const h = Number(m[1]);
+  return h >= 0 && h <= 23 ? h : null;
+}
+
+// 0 = lunes ... 6 = domingo
+function diaSemana(fecha) {
+  const d = new Date(fecha + "T00:00:00");
+  if (isNaN(d.getTime())) return null;
+  return (d.getDay() + 6) % 7;
+}
+
+// Solo cuenta tareas CUMPLIDAS que tengan hora registrada (los registros
+// anteriores a esta versión no tienen hora y quedan fuera del mapa).
+export function horarioDe(rows, peak) {
+  const cumplidas = rows.filter((r) => r.estado === "Cumplida");
+  const grid = Array.from({ length: 7 }, () => Array(24).fill(0));
+  const porEst = {};
+  for (let n = 1; n <= 10; n++) porEst[n] = { evaluables: 0, enIdeal: 0 };
+  let conHora = 0, evaluables = 0, enIdeal = 0, enPeak = 0;
+
+  cumplidas.forEach((r) => {
+    const h = horaDe(r);
+    const d = diaSemana(r.fecha);
+    if (h === null || d === null) return;
+    conHora += 1;
+    grid[d][h] += 1;
+    const peakHora = esHoraPeak(h, peak);
+    if (peakHora) enPeak += 1;
+    const ideal = HORARIO_IDEAL[r.estrategia];
+    if (!ideal) return;
+    evaluables += 1;
+    porEst[r.estrategia].evaluables += 1;
+    if ((ideal === "peak") === peakHora) {
+      enIdeal += 1;
+      porEst[r.estrategia].enIdeal += 1;
+    }
+  });
+
+  const porEstrategia = [];
+  for (let n = 1; n <= 10; n++) {
+    porEstrategia.push({
+      n, nombre: NOMBRES_ESTRATEGIA[n], ideal: HORARIO_IDEAL[n],
+      evaluables: porEst[n].evaluables, enIdeal: porEst[n].enIdeal,
+      pct: pct(porEst[n].enIdeal, porEst[n].evaluables),
+    });
+  }
+
+  return {
+    grid, conHora, sinHora: cumplidas.length - conHora,
+    evaluables, enIdeal, idealPct: pct(enIdeal, evaluables),
+    enPeak, porEstrategia,
+  };
+}
+
 export function formatCLP(valor) {
   return "$" + Math.round(valor || 0).toLocaleString("es-CL");
 }
@@ -147,7 +238,7 @@ function insigniasDe({ racha, equilibrio, porEstrategia, resultados, total, esLi
   return insignias;
 }
 
-function generarFeedback({ nombre, total, cumplidas, pctEnt, teamPct, porEstrategia, tendencia, proyeccionPct, resultados, valorPorCliente, racha }) {
+function generarFeedback({ nombre, total, cumplidas, pctEnt, teamPct, porEstrategia, tendencia, proyeccionPct, resultados, valorPorCliente, racha, horario }) {
   const lines = [];
   if (total === 0) {
     lines.push(`${nombre} aún no tiene registros en el tablero. Anímalo(a) a empezar a marcar sus tareas para poder darle seguimiento real.`);
@@ -188,6 +279,16 @@ function generarFeedback({ nombre, total, cumplidas, pctEnt, teamPct, porEstrate
     lines.push(`Racha activa: lleva ${racha} semanas seguidas con al menos ${RACHA_UMBRAL_PCT}% de cumplimiento — buen momento para reconocer la constancia.`);
   }
 
+  if (horario && horario.evaluables >= 5) {
+    if (horario.idealPct >= 70) {
+      lines.push(`Horario: el ${horario.idealPct}% de sus tareas cumplidas se hizo en el horario ideal de cada estrategia — está aprovechando bien las horas de flujo.`);
+    } else if (horario.idealPct < 50) {
+      lines.push(`Horario: solo el ${horario.idealPct}% de sus tareas cumplidas se hizo en el horario ideal de cada estrategia. Conviene revisar si aplica las estrategias de contacto en horas de bajo flujo, donde rinden menos.`);
+    } else {
+      lines.push(`Horario: el ${horario.idealPct}% de sus tareas cumplidas se hizo en el horario ideal de cada estrategia — hay margen para concentrar más acciones en su franja correcta.`);
+    }
+  }
+
   lines.push(`Proyección próxima semana: cerca de ${proyeccionPct}% de cumplimiento si continúa el ritmo actual.`);
   return lines;
 }
@@ -196,6 +297,7 @@ export function computeKpis(state) {
   const log = state.log || [];
   const entrenadores = state.entrenadores || [];
   const valorPorCliente = Number(state.config?.valorPorCliente) || 0;
+  const peak = normalizarPeak(state.config?.peak);
 
   const totalEquipo = log.length;
   const cumplidasEquipo = log.filter((r) => r.estado === "Cumplida").length;
@@ -205,6 +307,7 @@ export function computeKpis(state) {
   const proyeccionEquipo = proyectar(serieEquipo);
   const resultadosEquipo = resultadosDe(log);
   const valorEstimadoEquipo = resultadosEquipo.conversion * valorPorCliente;
+  const horarioEquipo = horarioDe(log, peak);
 
   const porEntrenador = entrenadores.map((nombre) => {
     const rows = log.filter((r) => r.entrenador === nombre);
@@ -220,15 +323,16 @@ export function computeKpis(state) {
     const valorEstimado = resultados.conversion * valorPorCliente;
     const racha = rachaDe(serie);
     const equilibrio = equilibrioDe(porEstrategia);
+    const horario = horarioDe(rows, peak);
     const feedback = generarFeedback({
       nombre, total, cumplidas, pctEnt, teamPct: pctEquipo,
       porEstrategia, tendencia: proyeccion.tendencia, proyeccionPct: proyeccion.proyeccionPct,
-      resultados, valorPorCliente, racha,
+      resultados, valorPorCliente, racha, horario,
     });
     return {
       nombre, total, cumplidas, noCumplidas, pendientes, pct: pctEnt,
       porEstrategia, serieSemanal: serie, proyeccion, resultados, valorEstimado,
-      racha, equilibrio, feedback,
+      racha, equilibrio, horario, feedback,
     };
   });
 
@@ -249,10 +353,12 @@ export function computeKpis(state) {
   return {
     generadoEn: new Date().toISOString(),
     valorPorCliente,
+    peak,
     equipo: {
       total: totalEquipo, cumplidas: cumplidasEquipo, pct: pctEquipo,
       porEstrategia: porEstrategiaEquipo, serieSemanal: serieEquipo, proyeccion: proyeccionEquipo,
       resultados: resultadosEquipo, valorEstimado: valorEstimadoEquipo,
+      horario: horarioEquipo,
     },
     porEntrenador,
     ranking: ranking.map((r, i) => ({ posicion: i + 1, nombre: r.nombre, pct: r.pct, total: r.total, conversion: r.resultados.conversion, racha: r.racha })),
