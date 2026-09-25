@@ -50,6 +50,12 @@ export function reportHtmlEntrenador(ent, teamPct, generadoEn) {
         ${statCard(formatCLP(ent.valorEstimado), "Valor estimado generado")}
       </div>
 
+      ${ent.insignias.length ? `
+      <h3 style="color:#1F3864;font-size:16px;margin:18px 0 8px;">Insignias</h3>
+      <div style="margin-bottom:8px;">
+        ${ent.insignias.map((i) => `<span style="display:inline-block;background:#F4F6F8;border-radius:999px;padding:6px 12px;font-size:13px;margin:0 6px 6px 0;">${i.icono} ${i.label}</span>`).join("")}
+      </div>` : ""}
+
       <h3 style="color:#1F3864;font-size:16px;margin:18px 0 8px;">Feedback del mentor (generado a partir de los datos)</h3>
       <ul style="padding-left:18px;font-size:14px;line-height:1.5;">
         ${ent.feedback.map((f) => `<li>${f}</li>`).join("")}
@@ -77,6 +83,7 @@ export function reportHtmlEquipo(kpis) {
       <td style="padding:6px 10px;border-bottom:1px solid #E4E7EB;">${r.nombre}</td>
       <td style="padding:6px 10px;border-bottom:1px solid #E4E7EB;text-align:center;">${r.total}</td>
       <td style="padding:6px 10px;border-bottom:1px solid #E4E7EB;text-align:center;color:${badgeColor(r.pct)};font-weight:bold;">${r.pct}%</td>
+      <td style="padding:6px 10px;border-bottom:1px solid #E4E7EB;text-align:center;">${r.racha > 0 ? "🔥 " + r.racha : "—"}</td>
     </tr>`).join("");
 
   return `
@@ -114,6 +121,7 @@ export function reportHtmlEquipo(kpis) {
           <th style="padding:6px 10px;text-align:left;">Entrenador</th>
           <th style="padding:6px 10px;">Registros</th>
           <th style="padding:6px 10px;">% Cumplimiento</th>
+          <th style="padding:6px 10px;">Racha</th>
         </tr>
         ${filasRanking}
       </table>
