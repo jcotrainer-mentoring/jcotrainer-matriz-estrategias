@@ -56,7 +56,7 @@ export default async (req) => {
       if (!ent) {
         return new Response(JSON.stringify({ error: "Entrenador no encontrado" }), { status: 404, headers: HEADERS });
       }
-      html = reportHtmlEntrenador(ent, kpis.equipo.pct, kpis.generadoEn);
+      html = reportHtmlEntrenador(ent, kpis.equipo.pct, kpis.generadoEn, kpis.peak);
       subject = `JCOTRAINER · Informe de ${entrenador}`;
     } else {
       html = reportHtmlEquipo(kpis);
