@@ -94,7 +94,60 @@ function porEstrategiaDe(rows) {
   return out;
 }
 
-function generarFeedback({ nombre, total, cumplidas, pctEnt, teamPct, porEstrategia, tendencia, proyeccionPct, resultados, valorPorCliente }) {
+// ---------------------------------------------------------------
+// Gamificación: racha de semanas, equilibrio entre estrategias, insignias.
+// ---------------------------------------------------------------
+const RACHA_UMBRAL_PCT = 60; // % mínimo de cumplimiento en una semana para que cuente en la racha
+
+// Cuenta semanas consecutivas (desde la más reciente hacia atrás) donde el
+// entrenador tuvo actividad y su % de cumplimiento alcanzó el umbral.
+// Se corta en la primera semana que no cumple o que no tiene registros.
+function rachaDe(serie) {
+  let racha = 0;
+  for (let i = serie.length - 1; i >= 0; i--) {
+    const s = serie[i];
+    if (s.total > 0 && s.pct >= RACHA_UMBRAL_PCT) racha += 1;
+    else break;
+  }
+  return racha;
+}
+
+// Mide qué tan repartidas están las tareas cumplidas entre las 10 estrategias:
+// cobertura = en cuántas estrategias distintas tiene al menos 1 cumplida;
+// concentracionTop2Pct = qué % del total de cumplidas se concentra en sus 2
+// estrategias más usadas (si es muy alto, depende demasiado de pocas).
+function equilibrioDe(porEstrategia) {
+  const cumplidasPorEstrategia = porEstrategia.map((e) => e.cumplidas);
+  const totalCumplidas = cumplidasPorEstrategia.reduce((s, c) => s + c, 0);
+  const cobertura = cumplidasPorEstrategia.filter((c) => c > 0).length;
+  const top2 = [...cumplidasPorEstrategia].sort((a, b) => b - a).slice(0, 2).reduce((s, c) => s + c, 0);
+  const concentracionTop2Pct = totalCumplidas === 0 ? 0 : Math.round((top2 / totalCumplidas) * 100);
+  const equilibrado = totalCumplidas >= 10 && cobertura >= 6 && concentracionTop2Pct <= 50;
+  return { cobertura, concentracionTop2Pct, equilibrado, totalCumplidas };
+}
+
+function insigniasDe({ racha, equilibrio, porEstrategia, resultados, total, esLider }) {
+  const insignias = [];
+
+  if (racha >= 10) insignias.push({ id: "racha-10", icono: "🔥", label: "Racha de 10+ semanas" });
+  else if (racha >= 6) insignias.push({ id: "racha-6", icono: "🔥", label: "Racha de 6+ semanas" });
+  else if (racha >= 3) insignias.push({ id: "racha-3", icono: "🔥", label: "Racha de 3+ semanas" });
+
+  const dominadas = porEstrategia.filter((e) => e.total >= 3 && e.pct >= 80);
+  if (dominadas.length >= 3) insignias.push({ id: "dominador", icono: "🎯", label: `${dominadas.length} estrategias dominadas` });
+  else if (dominadas.length >= 1) insignias.push({ id: "dominada", icono: "🎯", label: `Estrategia dominada: ${dominadas[0].nombre}` });
+
+  if (equilibrio.equilibrado) insignias.push({ id: "equilibrado", icono: "⚖️", label: "Equipo equilibrado entre estrategias" });
+
+  if (resultados.conversion >= 5) insignias.push({ id: "cerrador", icono: "💎", label: "5+ clientes convertidos" });
+  else if (resultados.conversion >= 1) insignias.push({ id: "primera-conversion", icono: "💰", label: "Primera conversión lograda" });
+
+  if (esLider && total >= 5) insignias.push({ id: "lider", icono: "🏆", label: "Líder del equipo esta racha de datos" });
+
+  return insignias;
+}
+
+function generarFeedback({ nombre, total, cumplidas, pctEnt, teamPct, porEstrategia, tendencia, proyeccionPct, resultados, valorPorCliente, racha }) {
   const lines = [];
   if (total === 0) {
     lines.push(`${nombre} aún no tiene registros en el tablero. Anímalo(a) a empezar a marcar sus tareas para poder darle seguimiento real.`);
@@ -131,6 +184,10 @@ function generarFeedback({ nombre, total, cumplidas, pctEnt, teamPct, porEstrate
     lines.push("Todavía no registra resultados (interés o conversión) en sus tareas cumplidas — vale la pena reforzar el hábito de marcarlos.");
   }
 
+  if (racha >= 3) {
+    lines.push(`Racha activa: lleva ${racha} semanas seguidas con al menos ${RACHA_UMBRAL_PCT}% de cumplimiento — buen momento para reconocer la constancia.`);
+  }
+
   lines.push(`Proyección próxima semana: cerca de ${proyeccionPct}% de cumplimiento si continúa el ritmo actual.`);
   return lines;
 }
@@ -161,18 +218,33 @@ export function computeKpis(state) {
     const proyeccion = proyectar(serie);
     const resultados = resultadosDe(rows);
     const valorEstimado = resultados.conversion * valorPorCliente;
+    const racha = rachaDe(serie);
+    const equilibrio = equilibrioDe(porEstrategia);
     const feedback = generarFeedback({
       nombre, total, cumplidas, pctEnt, teamPct: pctEquipo,
       porEstrategia, tendencia: proyeccion.tendencia, proyeccionPct: proyeccion.proyeccionPct,
-      resultados, valorPorCliente,
+      resultados, valorPorCliente, racha,
     });
     return {
       nombre, total, cumplidas, noCumplidas, pendientes, pct: pctEnt,
-      porEstrategia, serieSemanal: serie, proyeccion, resultados, valorEstimado, feedback,
+      porEstrategia, serieSemanal: serie, proyeccion, resultados, valorEstimado,
+      racha, equilibrio, feedback,
     };
   });
 
   const ranking = [...porEntrenador].sort((a, b) => b.pct - a.pct || b.total - a.total);
+  const nombreLider = ranking.length && ranking[0].total > 0 ? ranking[0].nombre : null;
+
+  porEntrenador.forEach((ent) => {
+    ent.insignias = insigniasDe({
+      racha: ent.racha,
+      equilibrio: ent.equilibrio,
+      porEstrategia: ent.porEstrategia,
+      resultados: ent.resultados,
+      total: ent.total,
+      esLider: ent.nombre === nombreLider,
+    });
+  });
 
   return {
     generadoEn: new Date().toISOString(),
@@ -183,6 +255,6 @@ export function computeKpis(state) {
       resultados: resultadosEquipo, valorEstimado: valorEstimadoEquipo,
     },
     porEntrenador,
-    ranking: ranking.map((r, i) => ({ posicion: i + 1, nombre: r.nombre, pct: r.pct, total: r.total, conversion: r.resultados.conversion })),
+    ranking: ranking.map((r, i) => ({ posicion: i + 1, nombre: r.nombre, pct: r.pct, total: r.total, conversion: r.resultados.conversion, racha: r.racha })),
   };
 }
