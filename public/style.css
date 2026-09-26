@@ -347,7 +347,7 @@ h2 {
   .matriz-num { display: none; }
 }
 
-/* ---------- Horario: heatmap dÃ­a Ã— hora ---------- */
+/* ---------- Horario: heatmap día × hora ---------- */
 .heatmap-wrap { padding: 12px; }
 .heatmap { border-collapse: separate; border-spacing: 3px; margin: 0 auto; }
 .heatmap th {
@@ -411,3 +411,4 @@ input.inp-hora {
   font-size: 12px;
 }
 input.inp-hora.sin-hora { border-color: var(--amber); }
+

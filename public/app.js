@@ -71,6 +71,171 @@ function formatCLP(valor) {
 }
 
 // ---------------------------------------------------------------
+// Horario: heatmap día × hora y "horario ideal" por estrategia.
+// Mantener sincronizado con HORARIO_IDEAL / PEAK_DEFAULT en
+// netlify/functions/lib/kpis.js para que Seguimiento e Informes coincidan.
+// ---------------------------------------------------------------
+const HORARIO_IDEAL = {
+  1: "peak", 2: "peak", 3: "valle", 4: "valle", 5: "peak",
+  6: "peak", 7: "peak", 8: null, 9: "peak", 10: "peak",
+};
+const LABEL_IDEAL = { peak: "Peak", valle: "Valle" };
+const PEAK_DEFAULT = [[7, 9], [18, 21]];
+const DIAS = ["Lun", "Mar", "Mié", "Jue", "Vie", "Sáb", "Dom"];
+
+function pad2(n) { return String(n).padStart(2, "0"); }
+
+// Fecha y hora LOCALES del dispositivo (antes se usaba toISOString(), que
+// está en UTC: en Chile, lo marcado después de ~las 20:00–21:00 quedaba
+// registrado con la fecha del día siguiente).
+function fechaLocal(d = new Date()) {
+  return `${d.getFullYear()}-${pad2(d.getMonth() + 1)}-${pad2(d.getDate())}`;
+}
+function horaLocal(d = new Date()) {
+  return `${pad2(d.getHours())}:${pad2(d.getMinutes())}`;
+}
+
+function normalizarPeak(peak) {
+  if (!Array.isArray(peak)) return PEAK_DEFAULT;
+  const validas = peak
+    .map((v) => (Array.isArray(v) ? [Number(v[0]), Number(v[1])] : null))
+    .filter((v) => v && Number.isInteger(v[0]) && Number.isInteger(v[1]) && v[0] >= 0 && v[1] <= 24 && v[0] < v[1]);
+  return validas.length ? validas : PEAK_DEFAULT;
+}
+function peakActual() { return normalizarPeak(STATE?.config?.peak); }
+function esHoraPeak(h, peak) { return peak.some(([desde, hasta]) => h >= desde && h < hasta); }
+function textoPeak(peak) { return peak.map(([a, b]) => `${pad2(a)}:00–${pad2(b)}:00`).join(" y "); }
+function peakATexto(peak) { return peak.map(([a, b]) => `${pad2(a)}-${pad2(b)}`).join(", "); }
+
+// "07-09, 18-21" -> [[7,9],[18,21]]  (null si el formato no es válido)
+function parsePeakTexto(txt) {
+  const partes = String(txt || "").split(",").map((p) => p.trim()).filter(Boolean);
+  if (!partes.length) return null;
+  const out = [];
+  for (const p of partes) {
+    const m = p.match(/^(\d{1,2})(?::00)?\s*[-–a]\s*(\d{1,2})(?::00)?$/);
+    if (!m) return null;
+    const a = Number(m[1]), b = Number(m[2]);
+    if (a < 0 || b > 24 || a >= b) return null;
+    out.push([a, b]);
+  }
+  return out;
+}
+
+function horaDeRegistro(r) {
+  if (typeof r.hora !== "string") return null;
+  const m = r.hora.match(/^(\d{1,2}):(\d{2})$/);
+  if (!m) return null;
+  const h = Number(m[1]);
+  return h >= 0 && h <= 23 ? h : null;
+}
+function diaSemanaDe(fecha) {
+  const d = new Date(fecha + "T00:00:00");
+  return isNaN(d.getTime()) ? null : (d.getDay() + 6) % 7; // 0 = lunes
+}
+
+// Misma lógica que horarioDe() en lib/kpis.js (versión cliente para Seguimiento).
+function horarioLocal(rows, peak) {
+  const cumplidas = rows.filter((r) => r.estado === "Cumplida");
+  const grid = Array.from({ length: 7 }, () => Array(24).fill(0));
+  const porEst = {};
+  for (let n = 1; n <= 10; n++) porEst[n] = { evaluables: 0, enIdeal: 0 };
+  let conHora = 0, evaluables = 0, enIdeal = 0, enPeak = 0;
+  cumplidas.forEach((r) => {
+    const h = horaDeRegistro(r);
+    const d = diaSemanaDe(r.fecha);
+    if (h === null || d === null) return;
+    conHora += 1;
+    grid[d][h] += 1;
+    const peakHora = esHoraPeak(h, peak);
+    if (peakHora) enPeak += 1;
+    const ideal = HORARIO_IDEAL[r.estrategia];
+    if (!ideal) return;
+    evaluables += 1;
+    porEst[r.estrategia].evaluables += 1;
+    if ((ideal === "peak") === peakHora) { enIdeal += 1; porEst[r.estrategia].enIdeal += 1; }
+  });
+  return {
+    grid, conHora, sinHora: cumplidas.length - conHora,
+    evaluables, enIdeal, idealPct: pct(enIdeal, evaluables), enPeak,
+    porEstrategia: ESTRATEGIAS.map((e) => ({
+      n: e.n, nombre: e.nombre, ideal: HORARIO_IDEAL[e.n],
+      evaluables: porEst[e.n].evaluables, enIdeal: porEst[e.n].enIdeal,
+      pct: pct(porEst[e.n].enIdeal, porEst[e.n].evaluables),
+    })),
+  };
+}
+
+function tagIdeal(ideal) {
+  if (ideal === "peak") return `<span class="ideal-tag ideal-peak">Peak</span>`;
+  if (ideal === "valle") return `<span class="ideal-tag ideal-valle">Valle</span>`;
+  return `<span class="ideal-libre">Flexible</span>`;
+}
+
+// Pinta el bloque completo de horario (stats + heatmap + tabla) en los ids dados.
+function renderBloqueHorario(horario, peak, ids) {
+  const stats = document.getElementById(ids.stats);
+  const tabla = document.getElementById(ids.heatmap);
+  const leyenda = document.getElementById(ids.legend);
+  const tablaEst = document.getElementById(ids.tabla);
+  if (!stats || !tabla || !horario) return;
+
+  stats.innerHTML =
+    (horario.evaluables ? renderRing("En horario ideal", Math.round(horario.idealPct)) : renderStatCard("En horario ideal", "—")) +
+    renderStatCard("Cumplidas con hora", horario.conHora) +
+    renderStatCard("En horario peak", horario.enPeak) +
+    (horario.sinHora ? renderStatCard("Cumplidas sin hora", horario.sinHora) : "");
+
+  if (horario.conHora === 0) {
+    tabla.innerHTML = `<tr><td class="heatmap-vacio" style="width:auto;background:none;font-family:var(--body);font-weight:400;">Aún no hay tareas cumplidas con hora registrada. El mapa se va llenando con los registros nuevos (los anteriores a esta actualización no guardaban la hora, pero puedes agregársela desde Últimos registros).</td></tr>`;
+    if (leyenda) leyenda.innerHTML = "";
+  } else {
+    let minH = 6, maxH = 22;
+    horario.grid.forEach((fila) => fila.forEach((c, h) => { if (c > 0) { minH = Math.min(minH, h); maxH = Math.max(maxH, h); } }));
+    const max = Math.max(1, ...horario.grid.flat());
+    const horas = [];
+    for (let h = minH; h <= maxH; h++) horas.push(h);
+
+    tabla.innerHTML =
+      `<tr><th></th>${horas.map((h) => `<th class="${esHoraPeak(h, peak) ? "hm-peak" : ""}">${pad2(h)}</th>`).join("")}</tr>` +
+      DIAS.map((dia, i) => `<tr><th class="hm-dia">${dia}</th>${horas.map((h) => {
+        const c = horario.grid[i][h];
+        const clase = esHoraPeak(h, peak) ? "hm-col-peak" : "";
+        const titulo = `${dia} ${pad2(h)}:00 — ${c} ${c === 1 ? "tarea cumplida" : "tareas cumplidas"}`;
+        if (!c) return `<td class="${clase}" title="${titulo}"></td>`;
+        const alfa = 0.25 + 0.75 * (c / max);
+        const color = alfa > 0.6 ? "#1B1F23" : "#EDEFF2";
+        return `<td class="${clase}" title="${titulo}" style="background:rgba(139,197,63,${alfa.toFixed(2)});color:${color};">${c}</td>`;
+      }).join("")}</tr>`).join("");
+
+    if (leyenda) {
+      leyenda.innerHTML =
+        `<span><span class="hm-swatch" style="background:var(--amber-dim);border-bottom:2px solid var(--amber);"></span>Horario peak (${textoPeak(peak)})</span>` +
+        `<span><span class="hm-swatch" style="background:rgba(139,197,63,.3);"></span><span class="hm-swatch" style="background:rgba(139,197,63,1);"></span>Menos → más tareas cumplidas</span>` +
+        (horario.sinHora ? `<span>${horario.sinHora} ${horario.sinHora === 1 ? "tarea cumplida no tiene" : "tareas cumplidas no tienen"} hora y no aparece${horario.sinHora === 1 ? "" : "n"} en el mapa.</span>` : "");
+    }
+  }
+
+  if (tablaEst) {
+    tablaEst.innerHTML = `
+      <tr><th>N°</th><th>Estrategia</th><th>Horario ideal</th><th>Cumplidas con hora</th><th>En horario ideal</th><th>% en horario ideal</th></tr>
+      ${horario.porEstrategia.map((e) => {
+        const p = Math.round(e.pct);
+        return `<tr>
+        <td>${pad2(e.n)}</td>
+        <td>${e.nombre}</td>
+        <td>${tagIdeal(e.ideal)}</td>
+        <td>${e.ideal ? e.evaluables : "—"}</td>
+        <td>${e.ideal ? e.enIdeal : "—"}</td>
+        <td>${e.ideal && e.evaluables
+          ? `<div class="bar-cell"><div class="bar-track"><div class="bar-fill" style="width:${p}%;background:${colorPct(p)}"></div></div><span>${p}%</span></div>`
+          : `<span style="color:var(--steel)">—</span>`}</td>
+      </tr>`;
+      }).join("")}`;
+  }
+}
+
+// ---------------------------------------------------------------
 // Multi-cliente (multi-tenant): identificador de grupo via ?g= en la URL.
 // Sin el parámetro, todo funciona igual que antes (grupo por defecto).
 // ---------------------------------------------------------------
@@ -108,7 +273,13 @@ async function enviar(body) {
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(body),
   });
-  STATE = await res.json();
+  const data = await res.json();
+  if (!res.ok) {
+    toast(data.error || "No se pudo guardar el cambio");
+    await cargarEstado();
+    return;
+  }
+  STATE = data;
   renderAll();
 }
 
@@ -227,6 +398,7 @@ function renderMatriz() {
           <span>Frecuencia: <b>${e.frecuencia}</b></span>
           <span>KPI: <b>${e.kpi}</b></span>
           <span>Meta: <b>${e.meta}</b></span>
+          <span>Horario ideal: <b>${LABEL_IDEAL[HORARIO_IDEAL[e.n]] || "Flexible"}</b></span>
           <span class="badge ${badgeClass}">${row.estado}</span>
         </div>
         <div class="matriz-controls">
@@ -260,7 +432,7 @@ function renderMatriz() {
 // Render: Checklists
 // ---------------------------------------------------------------
 function contarHoy(estrategia, frecuencia) {
-  const hoy = new Date().toISOString().slice(0, 10);
+  const hoy = fechaLocal();
   return STATE.log.filter((r) => r.estrategia === estrategia && r.frecuencia === frecuencia && r.fecha === hoy && r.estado === "Cumplida").length;
 }
 
@@ -294,7 +466,8 @@ function renderChecklist(frecuenciaKey, contenedorId) {
     btn.addEventListener("click", () => {
       const t = TAREAS[btn.dataset.freq][Number(btn.dataset.idx)];
       const registro = {
-        fecha: new Date().toISOString().slice(0, 10),
+        fecha: fechaLocal(),
+        hora: horaLocal(),
         frecuencia: FREQ_LABEL[btn.dataset.freq],
         estrategia: t.estrategia,
         tarea: t.nombre,
@@ -350,7 +523,7 @@ function weekStartLocal(fechaStr) {
   const day = d.getDay();
   const diff = day === 0 ? -6 : 1 - day;
   d.setDate(d.getDate() + diff);
-  return d.toISOString().slice(0, 10);
+  return fechaLocal(d);
 }
 
 function serieSemanalLocal(rows) {
@@ -481,12 +654,21 @@ function renderSeguimiento() {
     <tr><th>Entrenador</th><th>Cumplidas</th><th>No cumplidas</th><th>Total</th><th>% Cumplimiento</th><th>Interés</th><th>Conversión</th><th>Racha</th><th>Insignias</th></tr>
     ${filasEnt}`;
 
+  // Horario del equipo (solo agregado; el detalle por entrenador vive en Informes)
+  const peak = peakActual();
+  const peakTexto = document.getElementById("peakTextoSeguimiento");
+  if (peakTexto) peakTexto.textContent = textoPeak(peak);
+  renderBloqueHorario(horarioLocal(log, peak), peak, {
+    stats: "horarioStatsEquipo", heatmap: "heatmapEquipo", legend: "heatmapLegendEquipo", tabla: "tablaHorarioEquipo",
+  });
+
   // Log reciente
   const recientes = log.slice(0, 25);
   document.getElementById("tablaLog").innerHTML = `
-    <tr><th>Fecha</th><th>Frecuencia</th><th>Estrategia</th><th>Tarea</th><th>Entrenador</th><th>Estado</th><th>Resultado</th><th></th></tr>
+    <tr><th>Fecha</th><th>Hora</th><th>Frecuencia</th><th>Estrategia</th><th>Tarea</th><th>Entrenador</th><th>Estado</th><th>Resultado</th><th></th></tr>
     ${recientes.map((r) => `<tr>
       <td>${r.fecha}</td>
+      <td><input type="time" class="inp-hora${r.hora ? "" : " sin-hora"}" data-id="${r.id}" data-original="${r.hora || ""}" value="${r.hora || ""}" title="${r.hora ? "Corregir hora" : "Sin hora registrada: puedes agregarla"}"></td>
       <td>${r.frecuencia}</td>
       <td>${nombreEstrategia(r.estrategia)}</td>
       <td>${r.tarea || ""}</td>
@@ -502,6 +684,18 @@ function renderSeguimiento() {
     sel.addEventListener("change", () => {
       enviar({ type: "actualizar-registro", id: sel.dataset.id, campo: "resultado", valor: sel.value });
       toast("Resultado actualizado");
+    });
+  });
+
+  // Corregir hora: se guarda al salir del campo (no mientras se escribe),
+  // para que el re-render no interrumpa la edición.
+  document.getElementById("tablaLog").querySelectorAll("input.inp-hora").forEach((inp) => {
+    inp.addEventListener("keydown", (e) => { if (e.key === "Enter") inp.blur(); });
+    inp.addEventListener("blur", () => {
+      if (inp.value === (inp.dataset.original || "")) return;
+      inp.dataset.original = inp.value;
+      enviar({ type: "actualizar-registro", id: inp.dataset.id, campo: "hora", valor: inp.value });
+      toast(inp.value ? "Hora actualizada" : "Hora eliminada");
     });
   });
 
@@ -643,6 +837,8 @@ async function intentarCargarKpis(clave, { silencioso = false } = {}) {
       document.getElementById("candadoInformes").hidden = true;
       document.getElementById("informesDesbloqueado").hidden = false;
       document.getElementById("valorPorClienteInput").value = KPIS.valorPorCliente || "";
+      const peakInput = document.getElementById("peakInput");
+      if (peakInput) peakInput.value = peakATexto(normalizarPeak(KPIS.peak));
       poblarSelectorInforme();
       renderInforme(document.getElementById("selectorInforme").value);
     } else if (data.error === "config-faltante") {
@@ -694,6 +890,27 @@ document.getElementById("btnGuardarValorCliente").addEventListener("click", asyn
     await enviar({ type: "reemplazar", data: { config: { valorPorCliente: valor } } });
     await intentarCargarKpis(claveCoachGuardada(), { silencioso: true });
     toast("Valor por cliente actualizado");
+  } finally {
+    btn.textContent = original;
+    btn.disabled = false;
+  }
+});
+
+document.getElementById("btnGuardarPeak")?.addEventListener("click", async () => {
+  const input = document.getElementById("peakInput");
+  const peak = parsePeakTexto(input.value);
+  if (!peak) {
+    toast("Formato inválido. Ejemplo: 07-09, 18-21");
+    return;
+  }
+  const btn = document.getElementById("btnGuardarPeak");
+  const original = btn.textContent;
+  btn.textContent = "Guardando...";
+  btn.disabled = true;
+  try {
+    await enviar({ type: "reemplazar", data: { config: { peak } } });
+    await intentarCargarKpis(claveCoachGuardada(), { silencioso: true });
+    toast("Horario peak actualizado: " + textoPeak(peak));
   } finally {
     btn.textContent = original;
     btn.disabled = false;
@@ -791,6 +1008,13 @@ function renderInforme(entrenadorSeleccionado) {
       }],
     },
     options: chartOptionsBase({ max: 100, suffix: "%" }),
+  });
+
+  // --- Horario de actividad (equipo o entrenador seleccionado) ---
+  const tituloHorario = document.getElementById("tituloHorario");
+  if (tituloHorario) tituloHorario.textContent = esEquipo ? "Horario de actividad del equipo" : `Horario de actividad de ${ent.nombre}`;
+  renderBloqueHorario(datosScope.horario, normalizarPeak(KPIS.peak), {
+    stats: "horarioStatsInforme", heatmap: "heatmapInforme", legend: "heatmapLegendInforme", tabla: "tablaHorarioInforme",
   });
 
   // --- Comparación por estrategia (solo si hay entrenador seleccionado) ---
@@ -928,7 +1152,11 @@ function abrirBorradorCorreo(destinatario, entrenadorSeleccionado) {
   const asunto = esEquipo ? "JCOTRAINER · Informe de equipo" : `JCOTRAINER · Informe de ${entrenadorSeleccionado}`;
   let cuerpo = `Informe generado desde el tablero JCOTRAINER\n\n`;
   cuerpo += `Cumplimiento: ${datos.pct}%\nRegistros totales: ${datos.total}\nProyección próxima semana: ${datos.proyeccion.proyeccionPct}%\n`;
-  cuerpo += `Interés generado: ${datos.resultados.interes}\nClientes convertidos: ${datos.resultados.conversion}\nValor estimado generado: ${formatCLP(datos.valorEstimado)}\n\n`;
+  cuerpo += `Interés generado: ${datos.resultados.interes}\nClientes convertidos: ${datos.resultados.conversion}\nValor estimado generado: ${formatCLP(datos.valorEstimado)}\n`;
+  if (datos.horario && datos.horario.evaluables) {
+    cuerpo += `Tareas en su horario ideal: ${datos.horario.idealPct}% (horario peak: ${textoPeak(normalizarPeak(KPIS.peak))})\n`;
+  }
+  cuerpo += "\n";
   if (!esEquipo) {
     cuerpo += `Racha actual: ${datos.racha > 0 ? datos.racha + " semanas" : "sin racha activa"}\n`;
     if (datos.insignias.length) cuerpo += "Insignias: " + datos.insignias.map((i) => i.icono + " " + i.label).join(", ") + "\n";
