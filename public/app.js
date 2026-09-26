@@ -64,7 +64,58 @@ const FREQ_LABEL = { diario: "Diaria", semanal: "Semanal", mensual: "Mensual" };
 // ---------------------------------------------------------------
 // Resultados de negocio: qué generó cada interacción cumplida.
 // ---------------------------------------------------------------
-const RESULTADO_OPTS = ["Sin resultado", "Interés generado", "Cliente convertido"];
+// Embudo de venta (modo Captación). Anotar siempre la etapa MÁS LEJANA
+// que alcanzó el socio; el conteo es acumulativo (igual que lib/kpis.js).
+const RESULTADO_OPTS = ["Sin resultado", "Interés generado", "Evaluación agendada", "Cliente convertido"];
+const RESULTADOS_CON_INTERES = ["Interés generado", "Evaluación agendada", "Cliente convertido"];
+const EMBUDO_PASO_BAJO = 30;
+
+function interesAcumulado(rows) {
+  return rows.filter((r) => r.estado === "Cumplida" && RESULTADOS_CON_INTERES.includes(r.resultado)).length;
+}
+
+function normalizarMeses(v) {
+  const n = Number(v);
+  if (!Number.isFinite(n) || n < 1) return 1;
+  return Math.min(60, Math.round(n * 10) / 10);
+}
+
+function renderEmbudo(res) {
+  const cont = document.getElementById("embudoInforme");
+  if (!cont || !res) return;
+  const max = Math.max(1, res.interes);
+  const fila = (n, label, color) => `
+    <div class="embudo-fila">
+      <span class="embudo-label">${label}</span>
+      <div class="embudo-track"><div class="embudo-bar" style="width:${Math.max(n ? 3 : 0, Math.round((n / max) * 100))}%;background:${color}"></div></div>
+      <span class="embudo-num">${n}</span>
+    </div>`;
+  const paso = (p, base) => base
+    ? `<div class="embudo-paso${p < EMBUDO_PASO_BAJO ? " bajo" : ""}">↓ ${Math.round(p)}% pasa a la siguiente etapa</div>`
+    : `<div class="embudo-paso">↓ —</div>`;
+  cont.innerHTML =
+    fila(res.interes, "Interés generado", "rgba(139,197,63,.45)") +
+    paso(res.pasoEvaluacion, res.interes) +
+    fila(res.evaluacion, "Evaluación agendada", "rgba(139,197,63,.72)") +
+    paso(res.pasoVenta, res.evaluacion) +
+    fila(res.conversion, "Cliente convertido", "var(--turf)") +
+    (res.interes ? "" : `<p class="note" style="margin:12px 0 0">Aún no hay resultados anotados. Se registran en Seguimiento → Últimos registros → Resultado.</p>`);
+}
+
+function renderValor(datos) {
+  const cont = document.getElementById("valorInforme");
+  if (!cont) return;
+  const v = datos.valor;
+  if (!v || !v.porCliente) {
+    cont.innerHTML = renderStatCard("Valor generado", "—<span class='valor-detalle'>Configura el valor promedio por cliente para calcularlo</span>");
+    return;
+  }
+  const n = datos.resultados.conversion;
+  const detalle = `${n} ${n === 1 ? "cliente" : "clientes"} × ${formatCLP(v.porCliente)}`;
+  cont.innerHTML =
+    renderStatCard(`Ingreso mensual generado<span class="valor-detalle">${detalle}</span>`, `${formatCLP(v.mensual)}<span style="font-size:14px">/mes</span>`) +
+    renderStatCard(`Valor total estimado<span class="valor-detalle">${detalle} × ${v.meses} ${v.meses === 1 ? "mes" : "meses"}</span>`, formatCLP(v.total));
+}
 
 function formatCLP(valor) {
   return "$" + Math.round(valor || 0).toLocaleString("es-CL");
@@ -587,7 +638,7 @@ function renderSeguimiento() {
   const log = STATE.log;
   const totalCumplidas = log.filter((r) => r.estado === "Cumplida").length;
   const total = log.length;
-  const totalInteres = log.filter((r) => r.estado === "Cumplida" && r.resultado === "Interés generado").length;
+  const totalInteres = interesAcumulado(log);
   const totalConversion = log.filter((r) => r.estado === "Cumplida" && r.resultado === "Cliente convertido").length;
 
   document.getElementById("ringsRow").innerHTML =
@@ -635,7 +686,7 @@ function renderSeguimiento() {
     const nc = rows.filter((r) => r.estado === "No cumplida").length;
     const t = rows.length;
     const p = pct(c, t);
-    const interes = rows.filter((r) => r.estado === "Cumplida" && r.resultado === "Interés generado").length;
+    const interes = interesAcumulado(rows);
     const conversion = rows.filter((r) => r.estado === "Cumplida" && r.resultado === "Cliente convertido").length;
     const { racha, insignias } = insigniasLocal(rows, lider && lider.ent === ent);
     return `<tr>
@@ -837,6 +888,8 @@ async function intentarCargarKpis(clave, { silencioso = false } = {}) {
       document.getElementById("candadoInformes").hidden = true;
       document.getElementById("informesDesbloqueado").hidden = false;
       document.getElementById("valorPorClienteInput").value = KPIS.valorPorCliente || "";
+      const mesesInput = document.getElementById("mesesInput");
+      if (mesesInput) mesesInput.value = normalizarMeses(KPIS.mesesPermanencia);
       const peakInput = document.getElementById("peakInput");
       if (peakInput) peakInput.value = peakATexto(normalizarPeak(KPIS.peak));
       poblarSelectorInforme();
@@ -896,6 +949,28 @@ document.getElementById("btnGuardarValorCliente").addEventListener("click", asyn
   }
 });
 
+document.getElementById("btnGuardarMeses")?.addEventListener("click", async () => {
+  const input = document.getElementById("mesesInput");
+  const n = Number(input.value);
+  if (!Number.isFinite(n) || n < 1 || n > 60) {
+    toast("Ingresa un número de meses entre 1 y 60");
+    return;
+  }
+  const meses = normalizarMeses(n);
+  const btn = document.getElementById("btnGuardarMeses");
+  const original = btn.textContent;
+  btn.textContent = "Guardando...";
+  btn.disabled = true;
+  try {
+    await enviar({ type: "reemplazar", data: { config: { mesesPermanencia: meses } } });
+    await intentarCargarKpis(claveCoachGuardada(), { silencioso: true });
+    toast(`Permanencia actualizada: ${meses} ${meses === 1 ? "mes" : "meses"}`);
+  } finally {
+    btn.textContent = original;
+    btn.disabled = false;
+  }
+});
+
 document.getElementById("btnGuardarPeak")?.addEventListener("click", async () => {
   const input = document.getElementById("peakInput");
   const peak = parsePeakTexto(input.value);
@@ -944,10 +1019,13 @@ function renderInforme(entrenadorSeleccionado) {
     renderStatCard("Registros totales", datosScope.total) +
     renderStatCard("Proyección próx. semana", datosScope.proyeccion.proyeccionPct + "%") +
     renderStatCard("Tendencia", { alza: "↑ Al alza", baja: "↓ A la baja", estable: "→ Estable", "sin datos": "Sin datos" }[datosScope.proyeccion.tendencia] || "—") +
-    renderStatCard("Interés generado", datosScope.resultados.interes) +
-    renderStatCard("Clientes convertidos", datosScope.resultados.conversion) +
-    renderStatCard("Valor estimado generado", formatCLP(datosScope.valorEstimado)) +
     (esEquipo ? "" : renderStatCard("Racha actual", ent.racha > 0 ? "🔥 " + ent.racha + " sem." : "0 sem."));
+
+  // --- Embudo de venta + valor generado ---
+  const tituloEmbudo = document.getElementById("tituloEmbudo");
+  if (tituloEmbudo) tituloEmbudo.textContent = esEquipo ? "Embudo de venta del equipo" : `Embudo de venta de ${ent.nombre}`;
+  renderEmbudo(datosScope.resultados);
+  renderValor(datosScope);
 
   // --- Ranking (siempre equipo completo) ---
   document.getElementById("tablaRanking").innerHTML = `
@@ -1152,7 +1230,11 @@ function abrirBorradorCorreo(destinatario, entrenadorSeleccionado) {
   const asunto = esEquipo ? "JCOTRAINER · Informe de equipo" : `JCOTRAINER · Informe de ${entrenadorSeleccionado}`;
   let cuerpo = `Informe generado desde el tablero JCOTRAINER\n\n`;
   cuerpo += `Cumplimiento: ${datos.pct}%\nRegistros totales: ${datos.total}\nProyección próxima semana: ${datos.proyeccion.proyeccionPct}%\n`;
-  cuerpo += `Interés generado: ${datos.resultados.interes}\nClientes convertidos: ${datos.resultados.conversion}\nValor estimado generado: ${formatCLP(datos.valorEstimado)}\n`;
+  const r = datos.resultados;
+  cuerpo += `\nEmbudo de venta:\n- Interés generado: ${r.interes}\n- Evaluación agendada: ${r.evaluacion} (${Math.round(r.pasoEvaluacion)}% de los interesados)\n- Cliente convertido: ${r.conversion} (${Math.round(r.pasoVenta)}% de las evaluaciones)\n`;
+  if (datos.valor && datos.valor.porCliente) {
+    cuerpo += `Ingreso mensual generado: ${formatCLP(datos.valor.mensual)}/mes\nValor total estimado: ${formatCLP(datos.valor.total)} (${datos.valor.meses} ${datos.valor.meses === 1 ? "mes" : "meses"} de permanencia)\n`;
+  }
   if (datos.horario && datos.horario.evaluables) {
     cuerpo += `Tareas en su horario ideal: ${datos.horario.idealPct}% (horario peak: ${textoPeak(normalizarPeak(KPIS.peak))})\n`;
   }

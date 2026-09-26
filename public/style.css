@@ -76,7 +76,7 @@ body {
 }
 .whoami label { font-family: var(--mono); text-transform: uppercase; letter-spacing: .5px; font-size: 11px; }
 
-select, input[type=text], input[type=date], input[type=time], textarea {
+select, input[type=text], input[type=number], input[type=date], input[type=time], textarea {
   background: var(--panel-2);
   border: 1px solid var(--line);
   color: var(--chalk);
@@ -411,4 +411,35 @@ input.inp-hora {
   font-size: 12px;
 }
 input.inp-hora.sin-hora { border-color: var(--amber); }
+
+/* ---------- Embudo de venta (modo Captación) ---------- */
+.embudo {
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  padding: 18px 20px;
+}
+.embudo-fila {
+  display: grid;
+  grid-template-columns: 170px 1fr 48px;
+  align-items: center;
+  gap: 12px;
+}
+.embudo-label { font-size: 14px; color: var(--chalk); }
+.embudo-track { background: var(--panel-2); border-radius: 6px; height: 26px; overflow: hidden; }
+.embudo-bar { height: 100%; border-radius: 6px; transition: width .4s ease; }
+.embudo-num { font-family: var(--mono); font-size: 18px; font-weight: 700; text-align: right; }
+.embudo-paso {
+  margin: 4px 0 4px 182px;
+  font-size: 12px;
+  color: var(--steel);
+  font-family: var(--mono);
+}
+.embudo-paso.bajo { color: var(--coral); }
+.valor-detalle { display: block; font-size: 11px; color: var(--steel); margin-top: 4px; font-family: var(--mono); text-transform: none; letter-spacing: 0; }
+@media (max-width: 600px) {
+  .embudo-fila { grid-template-columns: 110px 1fr 36px; gap: 8px; }
+  .embudo-label { font-size: 12px; }
+  .embudo-paso { margin-left: 118px; }
+}
 

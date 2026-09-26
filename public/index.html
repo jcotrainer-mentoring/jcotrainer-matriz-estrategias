@@ -67,6 +67,7 @@
       <li>En <strong>Matriz</strong>, actualiza el estado general de cada estrategia y deja notas si es necesario.</li>
       <li>Revisa <strong>Seguimiento</strong> para ver el avance del equipo y detectar qué estrategia necesita reforzarse.</li>
       <li>Si olvidaste marcar una tarea en el momento, corrige su hora en <strong>Seguimiento → Últimos registros</strong>.</li>
+      <li>Cuando una tarea genere un avance con el socio, anota el resultado en <strong>Seguimiento → Últimos registros → Resultado</strong>: <em>Interés generado</em>, <em>Evaluación agendada</em> o <em>Cliente convertido</em>. Elige siempre la etapa más lejana a la que llegó: si el socio compró, marca "Cliente convertido" (ya cuenta también como interés y evaluación).</li>
     </ol>
     <p class="note">Cada estrategia tiene un horario ideal. Las de contacto (vitrina, check-in, corrección técnica, ayuda operativa, alumno perdido o motivado) rinden más en el <strong>horario peak</strong>, con el gimnasio lleno. El mini-diagnóstico y la conversación con un cliente estancado funcionan mejor en <strong>horario valle</strong>, cuando hay tiempo para conversar.</p>
     <p class="note">Todo lo que registra un entrenador lo ven los demás: los datos se guardan en un mismo tablero compartido (Netlify Blobs), no en el navegador de cada persona.</p>
@@ -155,6 +156,12 @@
         <button class="btn btn-ok" id="btnGuardarValorCliente" type="button">Guardar</button>
       </div>
       <div class="config-row">
+        <label for="mesesInput">Meses promedio que se queda un cliente</label>
+        <input type="number" id="mesesInput" min="1" max="60" step="0.5" placeholder="Ej: 6" />
+        <button class="btn btn-ok" id="btnGuardarMeses" type="button">Guardar</button>
+        <span class="config-hint">Si el gimnasio no lo sabe, usa 3 (cifra conservadora). Con 1, el valor generado considera solo el primer mes.</span>
+      </div>
+      <div class="config-row">
         <label for="peakInput">Horario peak de este gimnasio</label>
         <input type="text" id="peakInput" class="input-peak" placeholder="07-09, 18-21" />
         <button class="btn btn-ok" id="btnGuardarPeak" type="button">Guardar</button>
@@ -176,6 +183,10 @@
 
       <div id="reporteContenido">
         <div class="rings-row" id="informeStats"></div>
+
+        <h2 id="tituloEmbudo">Embudo de venta</h2>
+        <div class="embudo" id="embudoInforme"></div>
+        <div class="rings-row" id="valorInforme" style="margin-top:14px"></div>
 
         <h2>Ranking del equipo</h2>
         <div class="table-wrap">
