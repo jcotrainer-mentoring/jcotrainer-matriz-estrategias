@@ -13,6 +13,53 @@ function statCard(valor, label) {
   </div>`;
 }
 
+// Embudo de venta + valor generado (modo Captación), para el correo.
+function bloqueEmbudo(res, valor) {
+  if (!res) return "";
+  const max = Math.max(1, res.interes);
+  const barra = (n, label, color) => `
+        <tr>
+          <td style="width:150px;padding:4px 10px 4px 0;font-size:13px;color:#1B1F23;">${label}</td>
+          <td style="padding:4px 0;">
+            <div style="background:#F4F6F8;border-radius:4px;">
+              <div style="width:${Math.max(n ? 4 : 0, Math.round((n / max) * 100))}%;background:${color};height:20px;border-radius:4px;"></div>
+            </div>
+          </td>
+          <td style="width:40px;padding:4px 0 4px 10px;font-size:15px;font-weight:bold;text-align:right;">${n}</td>
+        </tr>`;
+  const paso = (p, n) => `
+        <tr><td></td><td style="padding:0 0 2px;font-size:11px;color:#5B6770;">↓ ${n ? p + "% pasa a la siguiente etapa" : "—"}</td><td></td></tr>`;
+
+  let valorHtml = "";
+  if (valor && valor.porCliente > 0) {
+    const detalleMensual = `${res.conversion} ${res.conversion === 1 ? "cliente" : "clientes"} × ${formatCLP(valor.porCliente)}`;
+    valorHtml = `
+      <div style="display:flex;gap:16px;margin:12px 0 0;">
+        <div style="flex:1;background:#F4F6F8;border-radius:8px;padding:14px;text-align:center;">
+          <div style="font-size:22px;font-weight:bold;">${formatCLP(valor.mensual)}<span style="font-size:13px;font-weight:normal;">/mes</span></div>
+          <div style="font-size:12px;color:#5B6770;">Ingreso mensual generado</div>
+          <div style="font-size:11px;color:#93A1AC;margin-top:4px;">${detalleMensual}</div>
+        </div>
+        <div style="flex:1;background:#F4F6F8;border-radius:8px;padding:14px;text-align:center;">
+          <div style="font-size:22px;font-weight:bold;color:#3E7D1F;">${formatCLP(valor.total)}</div>
+          <div style="font-size:12px;color:#5B6770;">Valor total estimado</div>
+          <div style="font-size:11px;color:#93A1AC;margin-top:4px;">${detalleMensual} × ${valor.meses} ${valor.meses === 1 ? "mes" : "meses"}</div>
+        </div>
+      </div>`;
+  }
+
+  return `
+      <h3 style="color:#1F3864;font-size:16px;margin:18px 0 8px;">Embudo de venta</h3>
+      <table style="width:100%;border-collapse:collapse;">
+        ${barra(res.interes, "Interés generado", "#8BC53F")}
+        ${paso(res.pasoEvaluacion, res.interes)}
+        ${barra(res.evaluacion, "Evaluación agendada", "#5E9E2E")}
+        ${paso(res.pasoVenta, res.evaluacion)}
+        ${barra(res.conversion, "Cliente convertido", "#3E7D1F")}
+      </table>
+      ${valorHtml}`;
+}
+
 const DIAS = ["Lun", "Mar", "Mié", "Jue", "Vie", "Sáb", "Dom"];
 const LABEL_IDEAL = { peak: "Peak", valle: "Valle" };
 
@@ -100,11 +147,7 @@ export function reportHtmlEntrenador(ent, teamPct, generadoEn, peak) {
           <div style="font-size:12px;color:#5B6770;">Proyección próx. semana</div>
         </div>
       </div>
-      <div style="display:flex;gap:16px;margin:0 0 16px;">
-        ${statCard(ent.resultados.interes, "Interés generado")}
-        ${statCard(ent.resultados.conversion, "Clientes convertidos")}
-        ${statCard(formatCLP(ent.valorEstimado), "Valor estimado generado")}
-      </div>
+      ${bloqueEmbudo(ent.resultados, ent.valor)}
 
       ${ent.insignias.length ? `
       <h3 style="color:#1F3864;font-size:16px;margin:18px 0 8px;">Insignias</h3>
@@ -166,11 +209,7 @@ export function reportHtmlEquipo(kpis) {
           <div style="font-size:12px;color:#5B6770;">Proyección próx. semana</div>
         </div>
       </div>
-      <div style="display:flex;gap:16px;margin:0 0 16px;">
-        ${statCard(kpis.equipo.resultados.interes, "Interés generado")}
-        ${statCard(kpis.equipo.resultados.conversion, "Clientes convertidos")}
-        ${statCard(formatCLP(kpis.equipo.valorEstimado), "Valor estimado generado")}
-      </div>
+      ${bloqueEmbudo(kpis.equipo.resultados, kpis.equipo.valor)}
 
       ${bloqueHorario(kpis.equipo.horario, kpis.peak)}
 

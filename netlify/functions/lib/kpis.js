@@ -17,15 +17,34 @@ function pct(cumplidas, total) {
   return total === 0 ? 0 : Math.round((cumplidas / total) * 1000) / 10;
 }
 
-export const RESULTADOS = ["Sin resultado", "Interés generado", "Cliente convertido"];
+// Embudo de venta (modo Captación). El resultado de un registro es la etapa
+// MÁS LEJANA que alcanzó ese socio; el conteo es acumulativo: un cliente
+// convertido también cuenta como evaluación e interés.
+export const RESULTADOS = ["Sin resultado", "Interés generado", "Evaluación agendada", "Cliente convertido"];
+
+// Umbrales del feedback de cuello de botella
+const EMBUDO_MIN_MUESTRA = 3;
+const EMBUDO_PASO_BAJO = 30;
 
 function resultadosDe(rows) {
   const cumplidas = rows.filter((r) => r.estado === "Cumplida");
+  const cuenta = (res) => cumplidas.filter((r) => r.resultado === res).length;
+  const conversion = cuenta("Cliente convertido");
+  const evaluacion = cuenta("Evaluación agendada") + conversion;
+  const interes = cuenta("Interés generado") + evaluacion;
   return {
     sinResultado: cumplidas.filter((r) => (r.resultado || "Sin resultado") === "Sin resultado").length,
-    interes: cumplidas.filter((r) => r.resultado === "Interés generado").length,
-    conversion: cumplidas.filter((r) => r.resultado === "Cliente convertido").length,
+    interes, evaluacion, conversion,
+    pasoEvaluacion: pct(evaluacion, interes),
+    pasoVenta: pct(conversion, evaluacion),
   };
+}
+
+// Meses promedio que se queda un cliente (1 = solo el primer mes).
+export function normalizarMeses(v) {
+  const n = Number(v);
+  if (!Number.isFinite(n) || n < 1) return 1;
+  return Math.min(60, Math.round(n * 10) / 10);
 }
 
 // ---------------------------------------------------------------
@@ -238,7 +257,7 @@ function insigniasDe({ racha, equilibrio, porEstrategia, resultados, total, esLi
   return insignias;
 }
 
-function generarFeedback({ nombre, total, cumplidas, pctEnt, teamPct, porEstrategia, tendencia, proyeccionPct, resultados, valorPorCliente, racha, horario }) {
+function generarFeedback({ nombre, total, cumplidas, pctEnt, teamPct, porEstrategia, tendencia, proyeccionPct, resultados, valorPorCliente, mesesPermanencia, racha, horario }) {
   const lines = [];
   if (total === 0) {
     lines.push(`${nombre} aún no tiene registros en el tablero. Anímalo(a) a empezar a marcar sus tareas para poder darle seguimiento real.`);
@@ -265,14 +284,24 @@ function generarFeedback({ nombre, total, cumplidas, pctEnt, teamPct, porEstrate
   else if (tendencia === "baja") lines.push("Tendencia: su cumplimiento viene bajando en las últimas semanas — conviene revisar qué cambió.");
   else if (tendencia !== "sin datos") lines.push("Tendencia: su cumplimiento se ha mantenido estable en las últimas semanas.");
 
-  if (resultados && (resultados.interes > 0 || resultados.conversion > 0)) {
-    let linea = `Resultados: ${resultados.interes} interacciones generaron interés y ${resultados.conversion} se convirtieron en clientes nuevos.`;
+  if (resultados && resultados.interes > 0) {
+    const r = resultados;
+    let linea = `Embudo: ${r.interes} ${r.interes === 1 ? "socio mostró" : "socios mostraron"} interés, ${r.evaluacion} ${r.evaluacion === 1 ? "agendó" : "agendaron"} evaluación y ${r.conversion} ${r.conversion === 1 ? "se convirtió en cliente" : "se convirtieron en clientes"}.`;
     if (resultados.conversion > 0 && valorPorCliente > 0) {
-      linea += ` Valor estimado aportado: ${formatCLP(resultados.conversion * valorPorCliente)}.`;
+      const mensual = resultados.conversion * valorPorCliente;
+      linea += mesesPermanencia > 1
+        ? ` Valor estimado aportado: ${formatCLP(mensual * mesesPermanencia)} (${formatCLP(mensual)}/mes × ${mesesPermanencia} meses).`
+        : ` Ingreso mensual aportado: ${formatCLP(mensual)}.`;
     }
     lines.push(linea);
+    if (resultados.interes >= EMBUDO_MIN_MUESTRA && resultados.pasoEvaluacion < EMBUDO_PASO_BAJO) {
+      lines.push(`Cuello de botella: genera interés, pero solo el ${resultados.pasoEvaluacion}% de los interesados agenda una evaluación. Conviene trabajar cómo invita a la evaluación.`);
+    }
+    if (resultados.evaluacion >= EMBUDO_MIN_MUESTRA && resultados.pasoVenta < EMBUDO_PASO_BAJO) {
+      lines.push(`Cuello de botella: agenda evaluaciones, pero solo el ${resultados.pasoVenta}% termina comprando. Conviene trabajar la presentación de la propuesta y el precio.`);
+    }
   } else if (resultados && cumplidas > 0) {
-    lines.push("Todavía no registra resultados (interés o conversión) en sus tareas cumplidas — vale la pena reforzar el hábito de marcarlos.");
+    lines.push("Todavía no registra resultados (interés, evaluación o venta) en sus tareas cumplidas — vale la pena reforzar el hábito de marcarlos.");
   }
 
   if (racha >= 3) {
@@ -297,6 +326,7 @@ export function computeKpis(state) {
   const log = state.log || [];
   const entrenadores = state.entrenadores || [];
   const valorPorCliente = Number(state.config?.valorPorCliente) || 0;
+  const mesesPermanencia = normalizarMeses(state.config?.mesesPermanencia);
   const peak = normalizarPeak(state.config?.peak);
 
   const totalEquipo = log.length;
@@ -306,7 +336,8 @@ export function computeKpis(state) {
   const serieEquipo = serieSemanal(log);
   const proyeccionEquipo = proyectar(serieEquipo);
   const resultadosEquipo = resultadosDe(log);
-  const valorEstimadoEquipo = resultadosEquipo.conversion * valorPorCliente;
+  const valorMensualEquipo = resultadosEquipo.conversion * valorPorCliente;
+  const valorEstimadoEquipo = valorMensualEquipo * mesesPermanencia;
   const horarioEquipo = horarioDe(log, peak);
 
   const porEntrenador = entrenadores.map((nombre) => {
@@ -320,18 +351,20 @@ export function computeKpis(state) {
     const serie = serieSemanal(rows);
     const proyeccion = proyectar(serie);
     const resultados = resultadosDe(rows);
-    const valorEstimado = resultados.conversion * valorPorCliente;
+    const valorMensual = resultados.conversion * valorPorCliente;
+    const valorEstimado = valorMensual * mesesPermanencia;
     const racha = rachaDe(serie);
     const equilibrio = equilibrioDe(porEstrategia);
     const horario = horarioDe(rows, peak);
     const feedback = generarFeedback({
       nombre, total, cumplidas, pctEnt, teamPct: pctEquipo,
       porEstrategia, tendencia: proyeccion.tendencia, proyeccionPct: proyeccion.proyeccionPct,
-      resultados, valorPorCliente, racha, horario,
+      resultados, valorPorCliente, mesesPermanencia, racha, horario,
     });
     return {
       nombre, total, cumplidas, noCumplidas, pendientes, pct: pctEnt,
-      porEstrategia, serieSemanal: serie, proyeccion, resultados, valorEstimado,
+      porEstrategia, serieSemanal: serie, proyeccion, resultados, valorMensual, valorEstimado,
+      valor: { porCliente: valorPorCliente, meses: mesesPermanencia, mensual: valorMensual, total: valorEstimado },
       racha, equilibrio, horario, feedback,
     };
   });
@@ -353,11 +386,13 @@ export function computeKpis(state) {
   return {
     generadoEn: new Date().toISOString(),
     valorPorCliente,
+    mesesPermanencia,
     peak,
     equipo: {
       total: totalEquipo, cumplidas: cumplidasEquipo, pct: pctEquipo,
       porEstrategia: porEstrategiaEquipo, serieSemanal: serieEquipo, proyeccion: proyeccionEquipo,
-      resultados: resultadosEquipo, valorEstimado: valorEstimadoEquipo,
+      resultados: resultadosEquipo, valorMensual: valorMensualEquipo, valorEstimado: valorEstimadoEquipo,
+      valor: { porCliente: valorPorCliente, meses: mesesPermanencia, mensual: valorMensualEquipo, total: valorEstimadoEquipo },
       horario: horarioEquipo,
     },
     porEntrenador,
